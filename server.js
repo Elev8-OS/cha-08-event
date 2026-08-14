@@ -13,6 +13,19 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// --- Serve images stored as base64 text (keeps repo text-only) ---
+const IMG_TYPES = { png: 'image/png', jpg: 'image/jpeg' };
+app.get('/img/:name', (req, res) => {
+  const name = String(req.params.name).replace(/[^a-z0-9.]/gi, '');
+  const file = path.join(__dirname, 'assets-b64', name + '.txt');
+  const ext = name.split('.').pop();
+  if (!IMG_TYPES[ext] || !fs.existsSync(file)) return res.status(404).end();
+  const buf = Buffer.from(fs.readFileSync(file, 'utf8'), 'base64');
+  res.setHeader('Content-Type', IMG_TYPES[ext]);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(buf);
+});
+
 // --- RSVP endpoint ---
 app.post('/api/rsvp', (req, res) => {
   const { name, email, phone, company, role, guests, properties, employees, website } = req.body || {};
