@@ -69,6 +69,21 @@ button{margin-top:22px;width:100%;background:var(--ink);color:var(--cream);borde
 button:hover{background:#000}
 button:disabled{opacity:.6;cursor:wait}
 .form-note{font-size:13px;color:var(--grey);margin-top:12px;text-align:center}
+.step2{display:none}
+.paybox{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;background:#FCFBF8;border:1px solid #e5e0d5;border-radius:14px;padding:22px;margin-bottom:18px}
+.qris{width:230px;text-align:center;flex-shrink:0}
+.qris img{width:230px;height:230px;object-fit:contain;background:#fff;border:1px solid #e5e0d5;border-radius:10px;padding:8px}
+.qris .fallback{width:230px;height:230px;display:none;align-items:center;justify-content:center;text-align:center;font-size:13px;color:var(--grey);background:#fff;border:2px dashed var(--gold);border-radius:10px;padding:16px}
+.qris .amt{font-family:'Archivo Black',sans-serif;font-size:22px;margin-top:10px}
+.paysteps{flex:1;min-width:240px}
+.paysteps ol{margin:8px 0 0 18px;font-size:14.5px}
+.paysteps li{margin-bottom:7px}
+.drop{border:2px dashed #d8d2c4;border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:#FCFBF8}
+.drop.has{border-color:#137333;background:#f2fbf3}
+.drop small{display:block;color:var(--grey);margin-top:5px;font-size:12.5px}
+#preview{max-width:190px;max-height:190px;border-radius:8px;margin-top:12px;display:none;border:1px solid #e5e0d5}
+.backlink{display:inline-block;margin-top:14px;font-size:13.5px;color:var(--grey);text-decoration:underline;cursor:pointer}
+.summary{background:#F2EEE5;border-radius:10px;padding:12px 16px;font-size:14px;margin-bottom:16px}
 .success{display:none;text-align:center;background:#fff;border:2px solid var(--gold);border-radius:16px;padding:40px 30px;margin-top:30px}
 .success h3{font-family:'Archivo Black',sans-serif;font-size:24px}
 .success p{margin-top:10px}
@@ -191,42 +206,134 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
         <select id="f-guests" name="guests"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
     </div>
     <div class="hp"><label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div>
-    <button type="submit" id="btn">Register — includes free revenue analysis (IDR 2.5M value)</button>
+    <button type="button" id="btn-next">Continue to payment →</button>
     <div class="err" id="err"></div>
-    <div class="form-note">Participation fee: IDR 50,000 per person. We use your details for event registration and your revenue analysis only.</div>
+    <div class="form-note">Participation fee: IDR 50,000 per person, paid by QRIS in the next step. We use your details for event registration and your revenue analysis only.</div>
   </form>
 
+  <div class="step2" id="step2">
+    <div class="summary" id="summary"></div>
+    <div class="paybox">
+      <div class="qris">
+        <img id="qris-img" src="/img/qris.png" alt="QRIS payment code"
+             onerror="this.style.display='none';document.getElementById('qris-fallback').style.display='flex'">
+        <div class="fallback" id="qris-fallback">QRIS code is being set up. Please contact us on WhatsApp to complete your payment.</div>
+        <div class="amt">IDR 50,000</div>
+        <div style="font-size:13px;color:var(--grey);margin-top:2px">per person &middot; scan with any Indonesian banking or e-wallet app</div>
+      </div>
+      <div class="paysteps">
+        <b style="font-size:16px">How to complete your registration</b>
+        <ol>
+          <li>Scan the QRIS code with your banking or e-wallet app (GoPay, OVO, DANA, ShopeePay, any bank).</li>
+          <li>Pay <b>IDR 50,000</b> per seat.</li>
+          <li>Take a screenshot of the payment confirmation.</li>
+          <li>Upload the screenshot below and submit &mdash; your seat is confirmed once we verify the payment.</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="drop" id="drop">
+      <b>Upload payment screenshot</b>
+      <small>PNG, JPG or WEBP &middot; max 6 MB &middot; tap to choose a file</small>
+      <input type="file" id="proof" accept="image/png,image/jpeg,image/webp" style="display:none">
+      <img id="preview" alt="Payment screenshot preview">
+    </div>
+
+    <button type="button" id="btn-submit">Complete registration</button>
+    <div class="err" id="err2"></div>
+    <span class="backlink" id="back">&larr; Back to my details</span>
+  </div>
+
   <div class="success" id="ok">
-    <h3>YOU'RE IN.</h3>
-    <p>See you Friday, 28 August at OXO The Factory, 1.30 PM.<br>Participation fee: IDR 50,000 per person.<br>
-    Our team will contact you to schedule your <b>free revenue strategy analysis</b> (worth IDR 2.5 million).</p>
+    <h3>THANK YOU &mdash; ALMOST DONE.</h3>
+    <p>We have received your registration and your payment screenshot.<br>
+    Our team verifies the payment and confirms your seat by WhatsApp, usually within one working day.<br><br>
+    Friday, 28 August at OXO The Factory, 1.30 PM.<br>
+    We will also contact you to schedule your <b>free revenue strategy analysis</b> (worth IDR 2.5 million).</p>
   </div>
 
   <footer>An Elev8 Suite event with the Canggu Hospitality Association and Mekari · Bali, Indonesia</footer>
 </div>
 
 <script>
-document.getElementById('rsvp').addEventListener('submit', async function(e){
-  e.preventDefault();
-  var btn = document.getElementById('btn'), err = document.getElementById('err');
-  err.style.display = 'none';
-  var data = Object.fromEntries(new FormData(this).entries());
-  if(!data.name || !data.name.trim()){ err.textContent='Please enter your name.'; err.style.display='block'; return; }
-  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(data.email||'')){ err.textContent='Please enter a valid email.'; err.style.display='block'; return; }
-  if(!data.phone || data.phone.trim().length < 6){ err.textContent='Please enter your WhatsApp number.'; err.style.display='block'; return; }
-  btn.disabled = true; btn.textContent = 'Registering\u2026';
-  try{
-    var r = await fetch('/api/rsvp', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
-    var j = await r.json();
-    if(j.ok){ this.style.display='none'; document.getElementById('ok').style.display='block';
-      document.getElementById('ok').scrollIntoView({behavior:'smooth'}); }
-    else { throw new Error(j.error || 'Something went wrong.'); }
-  }catch(ex){
-    err.textContent = ex.message || 'Something went wrong — please try again.';
-    err.style.display='block'; btn.disabled=false;
-    btn.textContent='Register — includes free revenue analysis (IDR 2.5M value)';
+(function () {
+  var form = document.getElementById('rsvp');
+  var step2 = document.getElementById('step2');
+  var err = document.getElementById('err'), err2 = document.getElementById('err2');
+  var drop = document.getElementById('drop'), fileInput = document.getElementById('proof');
+  var preview = document.getElementById('preview');
+  var proofData = null, details = null;
+
+  function show(el, msg) { el.textContent = msg; el.style.display = 'block'; }
+  function hide(el) { el.style.display = 'none'; }
+
+  function collect() {
+    var d = Object.fromEntries(new FormData(form).entries());
+    if (!d.name || !d.name.trim()) { show(err, 'Please enter your name.'); return null; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email || '')) { show(err, 'Please enter a valid email.'); return null; }
+    if (!d.phone || d.phone.trim().length < 6) { show(err, 'Please enter your WhatsApp number.'); return null; }
+    return d;
   }
-});
+
+  document.getElementById('btn-next').addEventListener('click', function () {
+    hide(err);
+    details = collect();
+    if (!details) return;
+    var seats = parseInt(details.guests, 10) || 1;
+    var total = (seats * 50000).toLocaleString('en-US');
+    document.getElementById('summary').innerHTML =
+      '<b>' + details.name + '</b> &middot; ' + details.email + '<br>' +
+      seats + ' seat' + (seats > 1 ? 's' : '') + ' &middot; total to pay: <b>IDR ' + total + '</b>';
+    form.style.display = 'none';
+    step2.style.display = 'block';
+    step2.scrollIntoView({ behavior: 'smooth' });
+  });
+
+  document.getElementById('back').addEventListener('click', function () {
+    step2.style.display = 'none';
+    form.style.display = 'block';
+    form.scrollIntoView({ behavior: 'smooth' });
+  });
+
+  drop.addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () {
+    hide(err2);
+    var f = this.files && this.files[0];
+    if (!f) return;
+    if (f.size > 6 * 1024 * 1024) { show(err2, 'That image is larger than 6 MB. Please upload a smaller screenshot.'); return; }
+    var r = new FileReader();
+    r.onload = function () {
+      proofData = r.result;
+      preview.src = proofData;
+      preview.style.display = 'inline-block';
+      drop.classList.add('has');
+      drop.querySelector('b').textContent = 'Screenshot attached \u2014 tap to change';
+    };
+    r.readAsDataURL(f);
+  });
+
+  document.getElementById('btn-submit').addEventListener('click', async function () {
+    hide(err2);
+    if (!details) { show(err2, 'Please fill in your details first.'); return; }
+    if (!proofData) { show(err2, 'Please upload your payment screenshot to complete the registration.'); return; }
+    var btn = this;
+    btn.disabled = true; btn.textContent = 'Submitting\u2026';
+    try {
+      var payload = Object.assign({}, details, { proof: proofData });
+      var r = await fetch('/api/rsvp', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      var j = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Something went wrong.');
+      step2.style.display = 'none';
+      document.getElementById('ok').style.display = 'block';
+      document.getElementById('ok').scrollIntoView({ behavior: 'smooth' });
+    } catch (ex) {
+      show(err2, ex.message || 'Something went wrong \u2014 please try again.');
+      btn.disabled = false; btn.textContent = 'Complete registration';
+    }
+  });
+})();
 </script>
 </body>
 </html>
