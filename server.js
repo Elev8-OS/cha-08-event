@@ -42,6 +42,68 @@ app.get('/img/:name', (req, res) => {
   res.send(buf);
 });
 
+
+// --- GHL forwarding -------------------------------------------------------
+// Configure ONE of these in Railway env vars:
+//   A) GHL_WEBHOOK_URL   -> posts the full registration JSON to a GHL inbound webhook
+//   B) GHL_API_TOKEN + GHL_LOCATION_ID -> upserts the contact via the GHL API
+// Optional: GHL_TAG (default "cha-08-event"), GHL_SOURCE (default "CHA-08 landing page")
+const GHL_WEBHOOK_URL = process.env.GHL_WEBHOOK_URL || '';
+const GHL_API_TOKEN = process.env.GHL_API_TOKEN || '';
+const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID || '';
+const GHL_TAG = process.env.GHL_TAG || 'cha-08-event';
+const GHL_SOURCE = process.env.GHL_SOURCE || 'CHA-08 landing page';
+
+function splitName(full) {
+  const parts = String(full).trim().split(/\s+/);
+  return { firstName: parts.shift() || '', lastName: parts.join(' ') };
+}
+
+async function sendToGHL(entry) {
+  if (GHL_WEBHOOK_URL) {
+    const r = await fetch(GHL_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...entry, tag: GHL_TAG, source: GHL_SOURCE, event: 'CHA-08 Smarter Revenue, Better Tech' }),
+    });
+    if (!r.ok) throw new Error('webhook HTTP ' + r.status);
+    return 'webhook';
+  }
+  if (GHL_API_TOKEN && GHL_LOCATION_ID) {
+    const { firstName, lastName } = splitName(entry.name);
+    const r = await fetch('https://services.leadconnectorhq.com/contacts/upsert', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + GHL_API_TOKEN,
+        Version: '2021-07-28',
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        locationId: GHL_LOCATION_ID,
+        firstName, lastName,
+        name: entry.name,
+        email: entry.email,
+        phone: entry.phone,
+        companyName: entry.company || undefined,
+        source: GHL_SOURCE,
+        tags: [GHL_TAG],
+      }),
+    });
+    if (!r.ok) throw new Error('api HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
+    return 'api';
+  }
+  return 'disabled';
+}
+
+// Append sync outcome so nothing is silently lost
+function logSync(email, status, detail) {
+  try {
+    fs.appendFileSync(path.join(DATA_DIR, 'ghl-sync.jsonl'),
+      JSON.stringify({ ts: new Date().toISOString(), email, status, detail: detail || '' }) + '\n');
+  } catch (e) { console.error('[ghl] log failed', e.message); }
+}
+
 // --- RSVP endpoint ---
 app.post('/api/rsvp', (req, res) => {
   const { name, email, phone, company, role, guests, properties, employees, website } = req.body || {};
@@ -83,6 +145,12 @@ app.post('/api/rsvp', (req, res) => {
 
   fs.appendFileSync(DB_FILE, JSON.stringify(entry) + '\n');
   console.log('[rsvp]', entry.email, entry.company);
+
+  // Forward to GHL in the background: the visitor never waits on it
+  sendToGHL(entry)
+    .then((mode) => { if (mode !== 'disabled') { console.log('[ghl] sent via', mode, entry.email); logSync(entry.email, 'sent', mode); } })
+    .catch((e) => { console.error('[ghl] FAILED', entry.email, e.message); logSync(entry.email, 'failed', e.message); });
+
   return res.json({ ok: true });
 });
 
@@ -128,6 +196,26 @@ app.get('/admin.csv', (req, res) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="registrations.csv"');
   res.send(csv);
+});
+
+
+// Retry any registrations that failed to reach GHL
+app.get('/admin/resync', async (req, res) => {
+  if (!guard(req, res)) return;
+  const syncFile = path.join(DATA_DIR, 'ghl-sync.jsonl');
+  const status = new Map();
+  if (fs.existsSync(syncFile)) {
+    fs.readFileSync(syncFile, 'utf8').trim().split('\n').filter(Boolean).forEach((l) => {
+      try { const r = JSON.parse(l); status.set(r.email, r.status); } catch {}
+    });
+  }
+  const pending = readAll().filter((r) => status.get(r.email) !== 'sent');
+  let sent = 0; const errors = [];
+  for (const entry of pending) {
+    try { const mode = await sendToGHL(entry); if (mode !== 'disabled') { logSync(entry.email, 'sent', mode); sent++; } }
+    catch (e) { logSync(entry.email, 'failed', e.message); errors.push(entry.email + ': ' + e.message); }
+  }
+  res.json({ pending: pending.length, sent, errors });
 });
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
