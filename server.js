@@ -10,7 +10,7 @@ const ADMIN_KEY = process.env.ADMIN_KEY || '';
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
-app.use(express.json());
+app.use(express.json({ limit: '9mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 
@@ -60,6 +60,42 @@ const GHL_LOCATION_ID = real(process.env.GHL_LOCATION_ID);
 const GHL_TAG = process.env.GHL_TAG || 'cha-08-event';
 const GHL_SOURCE = process.env.GHL_SOURCE || 'CHA-08 landing page';
 const GHL_API_BASE = process.env.GHL_API_BASE || 'https://services.leadconnectorhq.com';
+const GHL_TAG_PAID = process.env.GHL_TAG_PAID || (GHL_TAG + ' - Paid');
+
+// --- Payment (QRIS) -------------------------------------------------------
+// PAYMENT_REQUIRED=false disables the proof-of-payment step entirely.
+const PAYMENT_REQUIRED = String(process.env.PAYMENT_REQUIRED || 'true').toLowerCase() !== 'false';
+const PAYMENT_AMOUNT = process.env.PAYMENT_AMOUNT || 'IDR 50,000';
+const PROOF_DIR = path.join(DATA_DIR, 'proofs');
+fs.mkdirSync(PROOF_DIR, { recursive: true });
+
+const PROOF_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+
+// Store a data-URL screenshot on disk; returns the filename or throws.
+function saveProof(dataUrl, email) {
+  const m = /^data:([^;]+);base64,(.+)$/.exec(String(dataUrl || ''));
+  if (!m) throw new Error('invalid image');
+  const ext = PROOF_TYPES[m[1].toLowerCase()];
+  if (!ext) throw new Error('unsupported image type');
+  const buf = Buffer.from(m[2], 'base64');
+  if (buf.length > 6 * 1024 * 1024) throw new Error('image too large');
+  const safe = email.replace(/[^a-z0-9]/gi, '_').slice(0, 40);
+  const file = `${Date.now()}-${safe}.${ext}`;
+  fs.writeFileSync(path.join(PROOF_DIR, file), buf);
+  return file;
+}
+
+// Payment verification status, newest entry wins
+function paidSet() {
+  const f = path.join(DATA_DIR, 'payments.jsonl');
+  const map = new Map();
+  if (fs.existsSync(f)) {
+    fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).forEach((l) => {
+      try { const r = JSON.parse(l); map.set(r.email, r.paid); } catch {}
+    });
+  }
+  return map;
+}
 
 function splitName(full) {
   const parts = String(full).trim().split(/\s+/);
@@ -120,6 +156,28 @@ async function sendToGHL(entry) {
   return 'disabled';
 }
 
+// Add a single tag to a contact (used when payment is verified)
+async function addGhlTag(entry, tag) {
+  const headers = {
+    Authorization: 'Bearer ' + GHL_API_TOKEN,
+    Version: '2021-07-28',
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  const up = await fetch(GHL_API_BASE + '/contacts/upsert', {
+    method: 'POST', headers,
+    body: JSON.stringify({ locationId: GHL_LOCATION_ID, email: entry.email, phone: entry.phone, name: entry.name }),
+  });
+  if (!up.ok) throw new Error('upsert HTTP ' + up.status);
+  const body = await up.json().catch(() => ({}));
+  const id = body?.contact?.id || body?.id;
+  if (!id) throw new Error('no contact id');
+  const tg = await fetch(GHL_API_BASE + '/contacts/' + id + '/tags', {
+    method: 'POST', headers, body: JSON.stringify({ tags: [tag] }),
+  });
+  if (!tg.ok) throw new Error('tag HTTP ' + tg.status);
+}
+
 // Append sync outcome so nothing is silently lost
 function logSync(email, status, detail) {
   try {
@@ -142,6 +200,19 @@ app.post('/api/rsvp', (req, res) => {
     return res.status(400).json({ ok: false, error: 'Please provide your WhatsApp number.' });
   }
 
+  // Proof of payment: registration is only accepted once the QRIS screenshot is attached
+  let proofFile = '';
+  if (PAYMENT_REQUIRED) {
+    if (!req.body.proof) {
+      return res.status(400).json({ ok: false, error: 'Please upload your payment screenshot to complete the registration.' });
+    }
+    try {
+      proofFile = saveProof(req.body.proof, String(email).trim().toLowerCase());
+    } catch (e) {
+      return res.status(400).json({ ok: false, error: 'We could not read that image (' + e.message + '). Please upload a PNG or JPG screenshot.' });
+    }
+  }
+
   const entry = {
     ts: new Date().toISOString(),
     name: String(name).trim().slice(0, 120),
@@ -152,6 +223,7 @@ app.post('/api/rsvp', (req, res) => {
     guests: Math.min(Math.max(parseInt(guests, 10) || 1, 1), 10),
     properties: String(properties || '').slice(0, 20),
     employees: String(employees || '').slice(0, 20),
+    proofFile,
     ip: (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim(),
   };
 
@@ -168,7 +240,7 @@ app.post('/api/rsvp', (req, res) => {
   }
 
   fs.appendFileSync(DB_FILE, JSON.stringify(entry) + '\n');
-  console.log('[rsvp]', entry.email, entry.company);
+  console.log('[rsvp]', entry.email, entry.company, entry.proofFile ? '(proof attached)' : '');
 
   // Forward to GHL in the background: the visitor never waits on it
   sendToGHL(entry)
@@ -198,24 +270,35 @@ app.get('/admin', (req, res) => {
   if (!guard(req, res)) return;
   const rows = readAll();
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const tr = rows.map((r) =>
-    `<tr><td>${esc(r.ts.slice(0, 16).replace('T', ' '))}</td><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${esc(r.phone)}</td><td>${esc(r.company)}</td><td>${esc(r.role)}</td><td>${esc(r.properties)}</td><td>${esc(r.employees)}</td><td>${esc(r.guests)}</td></tr>`
-  ).join('');
+  const paid = paidSet();
+  const k = encodeURIComponent(req.query.key);
+  const tr = rows.map((r) => {
+    const isPaid = paid.get(r.email) === true;
+    const proof = r.proofFile
+      ? `<a href="/admin/proof?key=${k}&file=${encodeURIComponent(r.proofFile)}" target="_blank">view</a>`
+      : '<span style="color:#999">none</span>';
+    const action = isPaid
+      ? '<span style="color:#137333;font-weight:600">PAID</span>'
+      : `<a href="/admin/verify?key=${k}&email=${encodeURIComponent(r.email)}">mark paid</a>`;
+    return `<tr${isPaid ? ' style="background:#f2fbf3"' : ''}><td>${esc(r.ts.slice(0, 16).replace('T', ' '))}</td><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${esc(r.phone)}</td><td>${esc(r.company)}</td><td>${esc(r.role)}</td><td>${esc(r.properties)}</td><td>${esc(r.employees)}</td><td>${esc(r.guests)}</td><td>${proof}</td><td>${action}</td></tr>`;
+  }).join('');
   res.send(`<!doctype html><meta charset="utf-8"><title>Registrations (${rows.length})</title>
   <style>body{font-family:system-ui;padding:24px;background:#F7F4EE}h1{font-size:20px}
   table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid #ddd;padding:6px 10px;font-size:14px;text-align:left}
   a{display:inline-block;margin-bottom:12px}</style>
-  <h1>Registrations: ${rows.length} (${rows.reduce((a, r) => a + (r.guests || 1), 0)} guests)</h1>
+  <h1>Registrations: ${rows.length} (${rows.reduce((a, r) => a + (r.guests || 1), 0)} guests) &middot; paid: ${rows.filter((r) => paid.get(r.email) === true).length}</h1>
   <a href="/admin.csv?key=${encodeURIComponent(req.query.key)}">Download CSV</a>
-  <table><tr><th>Time (UTC)</th><th>Name</th><th>Email</th><th>Phone/WA</th><th>Property/Company</th><th>Role</th><th>Properties</th><th>Employees</th><th>Guests</th></tr>${tr}</table>`);
+  <table><tr><th>Time (UTC)</th><th>Name</th><th>Email</th><th>Phone/WA</th><th>Property/Company</th><th>Role</th><th>Properties</th><th>Employees</th><th>Guests</th><th>Proof</th><th>Payment</th></tr>${tr}</table>`);
 });
 
 app.get('/admin.csv', (req, res) => {
   if (!guard(req, res)) return;
   const rows = readAll();
   const csvEsc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
-  const csv = ['ts,name,email,phone,company,role,properties,employees,guests']
-    .concat(rows.map((r) => [r.ts, r.name, r.email, r.phone, r.company, r.role, r.properties, r.employees, r.guests].map(csvEsc).join(',')))
+  const paid = paidSet();
+  const csv = ['ts,name,email,phone,company,role,properties,employees,guests,paid,proof_file']
+    .concat(rows.map((r) => [r.ts, r.name, r.email, r.phone, r.company, r.role, r.properties, r.employees, r.guests,
+      paid.get(r.email) === true ? 'yes' : 'no', r.proofFile || ''].map(csvEsc).join(',')))
     .join('\n');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="registrations.csv"');
@@ -242,14 +325,44 @@ app.get('/admin/resync', async (req, res) => {
   res.json({ pending: pending.length, sent, errors });
 });
 
+// Serve a payment screenshot (admin only - these contain personal data)
+app.get('/admin/proof', (req, res) => {
+  if (!guard(req, res)) return;
+  const file = String(req.query.file || '').replace(/[^a-z0-9._-]/gi, '');
+  const full = path.join(PROOF_DIR, file);
+  if (!file || !fs.existsSync(full)) return res.status(404).send('Not found');
+  const ext = file.split('.').pop().toLowerCase();
+  const type = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+  res.setHeader('Content-Type', type);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.send(fs.readFileSync(full));
+});
+
+// Mark a registration as paid; also tags the contact in GHL
+app.get('/admin/verify', async (req, res) => {
+  if (!guard(req, res)) return;
+  const email = String(req.query.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).send('email required');
+  fs.appendFileSync(path.join(DATA_DIR, 'payments.jsonl'),
+    JSON.stringify({ ts: new Date().toISOString(), email, paid: true }) + '\n');
+
+  const entry = readAll().find((r) => r.email === email);
+  if (entry && GHL_API_TOKEN && GHL_LOCATION_ID) {
+    try { await addGhlTag(entry, GHL_TAG_PAID); } catch (e) { console.error('[ghl] paid tag failed', e.message); }
+  }
+  res.redirect('/admin?key=' + encodeURIComponent(req.query.key));
+});
+
 app.get('/health', (_req, res) => res.json({
   ok: true,
   ghl: GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'not configured'),
   tag: GHL_TAG,
+  payment: PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via QRIS (proof required)' : 'disabled',
 }));
 
 app.listen(PORT, () => {
   const mode = GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'NOT CONFIGURED (still placeholders)');
   console.log(`CHA-08 event page running on :${PORT}`);
   console.log(`[ghl] mode: ${mode} | tag: "${GHL_TAG}"`);
+  console.log(`[payment] ${PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via QRIS, proof required' : 'disabled'}`);
 });
