@@ -13,6 +13,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+
 // --- Serve images stored as base64 text (keeps repo text-only) ---
 const IMG_TYPES = { png: 'image/png', jpg: 'image/jpeg' };
 app.get('/img/:name', (req, res) => {
