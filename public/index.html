@@ -240,7 +240,7 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
           <li>Transfer the amount above from any Indonesian bank app (BI-FAST works from every bank).</li>
           <li>Use your <b>name</b> as the transfer reference, so we can match the payment to your registration.</li>
           <li>Take a screenshot of the transfer confirmation.</li>
-          <li>Upload the screenshot below and submit &mdash; your seat is confirmed once we verify the payment.</li>
+          <li>Upload the screenshot below and submit &mdash; your seat is confirmed straight away.</li>
         </ol>
         <div style="margin-top:12px;font-size:13.5px;color:var(--grey)">Paying for more than one seat? Transfer the total shown above in a single payment.</div>
       </div>
@@ -259,11 +259,12 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
   </div>
 
   <div class="success" id="ok">
-    <h3>THANK YOU &mdash; ALMOST DONE.</h3>
-    <p>We have received your registration and your payment screenshot.<br>
-    Our team verifies the payment and confirms your seat by WhatsApp, usually within one working day.<br><br>
-    Friday, 28 August at OXO The Factory, 1.30 PM.<br>
-    We will also contact you to schedule your <b>free revenue strategy analysis</b> (worth IDR 2.5 million).</p>
+    <h3>YOU'RE IN.</h3>
+    <p>Your seat is confirmed &mdash; no further confirmation needed.<br><br>
+    <b>Friday, 28 August at OXO The Factory, 1.30 PM.</b><br>
+    Please bring your payment screenshot in case we need to check at the door.<br><br>
+    We will contact you to schedule your <b>free revenue strategy analysis</b> (worth IDR 2.5 million).<br>
+    <span style="font-size:13.5px;color:var(--grey)">If we cannot trace your payment, we will get in touch before the event.</span></p>
   </div>
 
   <footer>An Elev8 Suite event with the Canggu Hospitality Association and Mekari · Bali, Indonesia</footer>
@@ -316,10 +317,9 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
         var r = await fetch('/api/payment/status?order=' + encodeURIComponent(data.orderId));
         var j = await r.json();
         if (j.status === 'paid') {
-          document.getElementById('ok').querySelector('h3').textContent = "YOU'RE IN.";
           document.getElementById('ok').querySelector('p').innerHTML =
             'Payment received and your seat is confirmed.<br><br>' +
-            'Friday, 28 August at OXO The Factory, 1.30 PM.<br>' +
+            '<b>Friday, 28 August at OXO The Factory, 1.30 PM.</b><br><br>' +
             'We will contact you to schedule your <b>free revenue strategy analysis</b> (worth IDR 2.5 million).';
           succeed();
         } else if (j.status === 'failed') {
