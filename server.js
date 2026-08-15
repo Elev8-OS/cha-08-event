@@ -70,6 +70,7 @@ const GHL_TAG_PAID = process.env.GHL_TAG_PAID || (GHL_TAG + ' - Paid');
 // Custom field ids in GHL. Values must match the picklists configured there.
 const GHL_CF_PROPERTIES = process.env.GHL_CF_PROPERTIES || 'igDIndbcECJUpM96Kk7V'; // Number of Properties
 const GHL_CF_PMS = process.env.GHL_CF_PMS || '3Z3qAyZ0luOBmHeQh2AD';               // Current PMS / Software
+const GHL_CF_PAIN = process.env.GHL_CF_PAIN || 'K2mUif9zM7glvUu64oI9';             // Primary Pain Point
 
 // --- Payment --------------------------------------------------------------
 // PAYMENT_REQUIRED=false disables the proof-of-payment step entirely.
@@ -113,6 +114,7 @@ function ghlCustomFields(entry) {
   const out = [];
   if (entry.properties) out.push({ id: GHL_CF_PROPERTIES, key: 'number_of_properties', fieldValue: entry.properties });
   if (entry.pms) out.push({ id: GHL_CF_PMS, key: 'current_pms__software', fieldValue: entry.pms });
+  if (entry.pain) out.push({ id: GHL_CF_PAIN, key: 'primary_pain_point', fieldValue: entry.pain });
   return out;
 }
 
@@ -252,7 +254,7 @@ function confirmPaid(entry) {
 
 // --- RSVP endpoint ---
 app.post('/api/rsvp', (req, res) => {
-  const { name, email, phone, company, role, guests, properties, employees, pms, website } = req.body || {};
+  const { name, email, phone, company, role, guests, properties, employees, pms, pain, website } = req.body || {};
 
   // Honeypot: real users never fill "website"
   if (website) return res.json({ ok: true });
@@ -278,6 +280,7 @@ app.post('/api/rsvp', (req, res) => {
       properties: String(properties || '').slice(0, 20),
       employees: String(employees || '').slice(0, 20),
       pms: String(pms || '').slice(0, 40),
+      pain: String(pain || '').slice(0, 60),
       orderId: orderIdFor(String(email).trim().toLowerCase()),
       ip: (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim(),
     };
@@ -322,6 +325,7 @@ app.post('/api/rsvp', (req, res) => {
     properties: String(properties || '').slice(0, 20),
     employees: String(employees || '').slice(0, 20),
     pms: String(pms || '').slice(0, 40),
+    pain: String(pain || '').slice(0, 60),
     proofFile,
     ip: (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim(),
   };
@@ -381,7 +385,7 @@ app.get('/admin', (req, res) => {
     const action = isPaid
       ? '<span style="color:#137333;font-weight:600">PAID</span>'
       : `<a href="/admin/verify?key=${k}&email=${encodeURIComponent(r.email)}">mark paid</a>`;
-    return `<tr${isPaid ? ' style="background:#f2fbf3"' : ''}><td>${esc(r.ts.slice(0, 16).replace('T', ' '))}</td><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${esc(r.phone)}</td><td>${esc(r.company)}</td><td>${esc(r.role)}</td><td>${esc(r.properties)}</td><td>${esc(r.employees)}</td><td>${esc(r.pms)}</td><td>${esc(r.guests)}</td><td>${money(due)}</td><td>${proof}</td><td>${action}</td></tr>`;
+    return `<tr${isPaid ? ' style="background:#f2fbf3"' : ''}><td>${esc(r.ts.slice(0, 16).replace('T', ' '))}</td><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${esc(r.phone)}</td><td>${esc(r.company)}</td><td>${esc(r.role)}</td><td>${esc(r.properties)}</td><td>${esc(r.employees)}</td><td>${esc(r.pms)}</td><td>${esc(r.pain)}</td><td>${esc(r.guests)}</td><td>${money(due)}</td><td>${proof}</td><td>${action}</td></tr>`;
   }).join('');
   const seats = rows.reduce((a, r) => a + (r.guests || 1), 0);
   const totalDue = seats * SEAT_PRICE;
@@ -391,7 +395,7 @@ app.get('/admin', (req, res) => {
   a{display:inline-block;margin-bottom:12px}</style>
   <h1>Registrations: ${rows.length} &middot; ${seats} seats &middot; paid: ${rows.filter((r) => paid.get(r.email) === true).length} &middot; total: ${money(totalDue)}</h1>
   <a href="/admin.csv?key=${encodeURIComponent(req.query.key)}">Download CSV</a>
-  <table><tr><th>Time (UTC)</th><th>Name</th><th>Email</th><th>Phone/WA</th><th>Property/Company</th><th>Role</th><th>Properties</th><th>Employees</th><th>PMS</th><th>Seats</th><th>Amount</th><th>Proof</th><th>Payment</th></tr>${tr}</table>`);
+  <table><tr><th>Time (UTC)</th><th>Name</th><th>Email</th><th>Phone/WA</th><th>Property/Company</th><th>Role</th><th>Properties</th><th>Employees</th><th>PMS</th><th>Pain point</th><th>Seats</th><th>Amount</th><th>Proof</th><th>Payment</th></tr>${tr}</table>`);
 });
 
 app.get('/admin.csv', (req, res) => {
@@ -399,8 +403,8 @@ app.get('/admin.csv', (req, res) => {
   const rows = readAll();
   const csvEsc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
   const paid = paidSet();
-  const csv = ['ts,name,email,phone,company,role,properties,employees,pms,seats,amount_idr,paid,proof_file,order_id']
-    .concat(rows.map((r) => [r.ts, r.name, r.email, r.phone, r.company, r.role, r.properties, r.employees, r.pms, r.guests,
+  const csv = ['ts,name,email,phone,company,role,properties,employees,pms,pain_point,seats,amount_idr,paid,proof_file,order_id']
+    .concat(rows.map((r) => [r.ts, r.name, r.email, r.phone, r.company, r.role, r.properties, r.employees, r.pms, r.pain, r.guests,
       (r.guests || 1) * SEAT_PRICE, paid.get(r.email) === true ? 'yes' : 'no', r.proofFile || '', r.orderId || ''].map(csvEsc).join(',')))
     .join('\n');
   res.setHeader('Content-Type', 'text/csv');
