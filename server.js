@@ -37,6 +37,9 @@ app.post('/api/rsvp', (req, res) => {
   if (!name || !name.trim() || !email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return res.status(400).json({ ok: false, error: 'Please provide your name and a valid email.' });
   }
+  if (!phone || String(phone).trim().length < 6) {
+    return res.status(400).json({ ok: false, error: 'Please provide your WhatsApp number.' });
+  }
 
   const entry = {
     ts: new Date().toISOString(),
