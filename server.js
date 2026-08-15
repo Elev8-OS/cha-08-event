@@ -12,7 +12,12 @@ const ADMIN_KEY = process.env.ADMIN_KEY || '';
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 app.use(express.json({ limit: '9mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+// Never let a browser hold on to a stale page: content changes right up to the event
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  },
+}));
 
 
 // --- Serve images stored as base64 text (single file or numbered chunks) ---
@@ -352,23 +357,27 @@ app.get('/admin', (req, res) => {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const paid = paidSet();
   const k = encodeURIComponent(req.query.key);
+  const money = (n) => 'IDR ' + Number(n).toLocaleString('en-US');
   const tr = rows.map((r) => {
     const isPaid = paid.get(r.email) === true;
+    const due = (r.guests || 1) * SEAT_PRICE;
     const proof = r.proofFile
       ? `<a href="/admin/proof?key=${k}&file=${encodeURIComponent(r.proofFile)}" target="_blank">view</a>`
       : (r.orderId ? '<span style="color:#999">auto</span>' : '<span style="color:#999">none</span>');
     const action = isPaid
       ? '<span style="color:#137333;font-weight:600">PAID</span>'
       : `<a href="/admin/verify?key=${k}&email=${encodeURIComponent(r.email)}">mark paid</a>`;
-    return `<tr${isPaid ? ' style="background:#f2fbf3"' : ''}><td>${esc(r.ts.slice(0, 16).replace('T', ' '))}</td><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${esc(r.phone)}</td><td>${esc(r.company)}</td><td>${esc(r.role)}</td><td>${esc(r.properties)}</td><td>${esc(r.employees)}</td><td>${esc(r.guests)}</td><td>${proof}</td><td>${action}</td></tr>`;
+    return `<tr${isPaid ? ' style="background:#f2fbf3"' : ''}><td>${esc(r.ts.slice(0, 16).replace('T', ' '))}</td><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${esc(r.phone)}</td><td>${esc(r.company)}</td><td>${esc(r.role)}</td><td>${esc(r.properties)}</td><td>${esc(r.employees)}</td><td>${esc(r.guests)}</td><td>${money(due)}</td><td>${proof}</td><td>${action}</td></tr>`;
   }).join('');
+  const seats = rows.reduce((a, r) => a + (r.guests || 1), 0);
+  const totalDue = seats * SEAT_PRICE;
   res.send(`<!doctype html><meta charset="utf-8"><title>Registrations (${rows.length})</title>
   <style>body{font-family:system-ui;padding:24px;background:#F7F4EE}h1{font-size:20px}
   table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid #ddd;padding:6px 10px;font-size:14px;text-align:left}
   a{display:inline-block;margin-bottom:12px}</style>
-  <h1>Registrations: ${rows.length} (${rows.reduce((a, r) => a + (r.guests || 1), 0)} guests) &middot; paid: ${rows.filter((r) => paid.get(r.email) === true).length}</h1>
+  <h1>Registrations: ${rows.length} &middot; ${seats} seats &middot; paid: ${rows.filter((r) => paid.get(r.email) === true).length} &middot; total: ${money(totalDue)}</h1>
   <a href="/admin.csv?key=${encodeURIComponent(req.query.key)}">Download CSV</a>
-  <table><tr><th>Time (UTC)</th><th>Name</th><th>Email</th><th>Phone/WA</th><th>Property/Company</th><th>Role</th><th>Properties</th><th>Employees</th><th>Guests</th><th>Proof</th><th>Payment</th></tr>${tr}</table>`);
+  <table><tr><th>Time (UTC)</th><th>Name</th><th>Email</th><th>Phone/WA</th><th>Property/Company</th><th>Role</th><th>Properties</th><th>Employees</th><th>Seats</th><th>Amount</th><th>Proof</th><th>Payment</th></tr>${tr}</table>`);
 });
 
 app.get('/admin.csv', (req, res) => {
@@ -376,9 +385,9 @@ app.get('/admin.csv', (req, res) => {
   const rows = readAll();
   const csvEsc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
   const paid = paidSet();
-  const csv = ['ts,name,email,phone,company,role,properties,employees,guests,paid,proof_file,order_id']
+  const csv = ['ts,name,email,phone,company,role,properties,employees,seats,amount_idr,paid,proof_file,order_id']
     .concat(rows.map((r) => [r.ts, r.name, r.email, r.phone, r.company, r.role, r.properties, r.employees, r.guests,
-      paid.get(r.email) === true ? 'yes' : 'no', r.proofFile || '', r.orderId || ''].map(csvEsc).join(',')))
+      (r.guests || 1) * SEAT_PRICE, paid.get(r.email) === true ? 'yes' : 'no', r.proofFile || '', r.orderId || ''].map(csvEsc).join(',')))
     .join('\n');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="registrations.csv"');
