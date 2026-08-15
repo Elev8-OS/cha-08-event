@@ -213,7 +213,25 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
 
   <div class="step2" id="step2">
     <div class="summary" id="summary"></div>
-    <div class="paybox">
+
+    <div class="paybox" id="paybox-auto" style="display:none">
+      <div class="qris">
+        <img id="auto-qr" alt="QRIS payment code">
+        <div class="amt" id="auto-amt">IDR 50,000</div>
+        <div style="font-size:13px;color:var(--grey);margin-top:2px">scan with any Indonesian banking or e-wallet app</div>
+      </div>
+      <div class="paysteps">
+        <b style="font-size:16px">Scan to pay &mdash; confirmation is automatic</b>
+        <ol>
+          <li>Open your banking or e-wallet app (GoPay, OVO, DANA, ShopeePay, any bank).</li>
+          <li>Scan the code and confirm &mdash; the amount is already filled in.</li>
+          <li>Stay on this page: your seat is confirmed the moment the payment arrives.</li>
+        </ol>
+        <div id="wait" style="margin-top:14px;font-weight:600;color:var(--gold-dark)">Waiting for your payment&hellip;</div>
+      </div>
+    </div>
+
+    <div class="paybox" id="paybox-manual">
       <div class="qris">
         <img id="qris-img" src="/img/qris.png" alt="QRIS payment code"
              onerror="this.style.display='none';document.getElementById('qris-fallback').style.display='flex'">
@@ -232,12 +250,12 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
       </div>
     </div>
 
-    <div class="drop" id="drop">
+    <div id="manual-upload"><div class="drop" id="drop">
       <b>Upload payment screenshot</b>
       <small>PNG, JPG or WEBP &middot; max 6 MB &middot; tap to choose a file</small>
       <input type="file" id="proof" accept="image/png,image/jpeg,image/webp" style="display:none">
       <img id="preview" alt="Payment screenshot preview">
-    </div>
+    </div></div>
 
     <button type="button" id="btn-submit">Complete registration</button>
     <div class="err" id="err2"></div>
@@ -262,10 +280,14 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
   var err = document.getElementById('err'), err2 = document.getElementById('err2');
   var drop = document.getElementById('drop'), fileInput = document.getElementById('proof');
   var preview = document.getElementById('preview');
-  var proofData = null, details = null;
+  var autoBox = document.getElementById('paybox-auto'), manualBox = document.getElementById('paybox-manual');
+  var manualUpload = document.getElementById('manual-upload');
+  var submitBtn = document.getElementById('btn-submit');
+  var proofData = null, details = null, poller = null;
 
   function show(el, msg) { el.textContent = msg; el.style.display = 'block'; }
   function hide(el) { el.style.display = 'none'; }
+  function money(n) { return 'IDR ' + Number(n).toLocaleString('en-US'); }
 
   function collect() {
     var d = Object.fromEntries(new FormData(form).entries());
@@ -275,21 +297,71 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
     return d;
   }
 
-  document.getElementById('btn-next').addEventListener('click', function () {
+  function succeed() {
+    if (poller) clearInterval(poller);
+    step2.style.display = 'none';
+    document.getElementById('ok').style.display = 'block';
+    document.getElementById('ok').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // Gateway mode: show the generated QR and wait for confirmation
+  function startAutoPayment(data) {
+    document.getElementById('auto-qr').src = data.qrImageUrl;
+    document.getElementById('auto-amt').textContent = money(data.amount);
+    autoBox.style.display = 'flex';
+    manualBox.style.display = 'none';
+    manualUpload.style.display = 'none';
+    submitBtn.style.display = 'none';
+    var tries = 0;
+    poller = setInterval(async function () {
+      tries++;
+      if (tries > 200) { clearInterval(poller); return; }
+      try {
+        var r = await fetch('/api/payment/status?order=' + encodeURIComponent(data.orderId));
+        var j = await r.json();
+        if (j.status === 'paid') {
+          document.getElementById('ok').querySelector('h3').textContent = "YOU'RE IN.";
+          document.getElementById('ok').querySelector('p').innerHTML =
+            'Payment received and your seat is confirmed.<br><br>' +
+            'Friday, 28 August at OXO The Factory, 1.30 PM.<br>' +
+            'We will contact you to schedule your <b>free revenue strategy analysis</b> (worth IDR 2.5 million).';
+          succeed();
+        } else if (j.status === 'failed') {
+          clearInterval(poller);
+          document.getElementById('wait').textContent = 'The payment expired or was cancelled. Please start again.';
+        }
+      } catch (e) { /* keep polling */ }
+    }, 3000);
+  }
+
+  document.getElementById('btn-next').addEventListener('click', async function () {
     hide(err);
     details = collect();
     if (!details) return;
     var seats = parseInt(details.guests, 10) || 1;
-    var total = (seats * 50000).toLocaleString('en-US');
     document.getElementById('summary').innerHTML =
       '<b>' + details.name + '</b> &middot; ' + details.email + '<br>' +
-      seats + ' seat' + (seats > 1 ? 's' : '') + ' &middot; total to pay: <b>IDR ' + total + '</b>';
+      seats + ' seat' + (seats > 1 ? 's' : '') + ' &middot; total to pay: <b>' + money(seats * 50000) + '</b>';
     form.style.display = 'none';
     step2.style.display = 'block';
     step2.scrollIntoView({ behavior: 'smooth' });
+
+    // Ask the server for a payment. If a gateway is live we get a QR back;
+    // otherwise we fall through to the static code + screenshot flow.
+    var btn = this;
+    btn.disabled = true;
+    try {
+      var r = await fetch('/api/rsvp', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(details)
+      });
+      var j = await r.json();
+      if (j.ok && j.mode === 'qris') startAutoPayment(j);
+    } catch (e) { /* manual flow stays visible */ }
+    btn.disabled = false;
   });
 
   document.getElementById('back').addEventListener('click', function () {
+    if (poller) clearInterval(poller);
     step2.style.display = 'none';
     form.style.display = 'block';
     form.scrollIntoView({ behavior: 'smooth' });
@@ -304,30 +376,27 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
     var r = new FileReader();
     r.onload = function () {
       proofData = r.result;
-      preview.src = proofData;
-      preview.style.display = 'inline-block';
+      preview.src = proofData; preview.style.display = 'inline-block';
       drop.classList.add('has');
       drop.querySelector('b').textContent = 'Screenshot attached \u2014 tap to change';
     };
     r.readAsDataURL(f);
   });
 
-  document.getElementById('btn-submit').addEventListener('click', async function () {
+  submitBtn.addEventListener('click', async function () {
     hide(err2);
     if (!details) { show(err2, 'Please fill in your details first.'); return; }
     if (!proofData) { show(err2, 'Please upload your payment screenshot to complete the registration.'); return; }
     var btn = this;
     btn.disabled = true; btn.textContent = 'Submitting\u2026';
     try {
-      var payload = Object.assign({}, details, { proof: proofData });
       var r = await fetch('/api/rsvp', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({}, details, { proof: proofData }))
       });
       var j = await r.json();
       if (!j.ok) throw new Error(j.error || 'Something went wrong.');
-      step2.style.display = 'none';
-      document.getElementById('ok').style.display = 'block';
-      document.getElementById('ok').scrollIntoView({ behavior: 'smooth' });
+      succeed();
     } catch (ex) {
       show(err2, ex.message || 'Something went wrong \u2014 please try again.');
       btn.disabled = false; btn.textContent = 'Complete registration';
