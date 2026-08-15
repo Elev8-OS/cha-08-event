@@ -230,19 +230,19 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
         <div class="acct" id="acct">09981499392</div>
         <div class="lbl">Account holder</div>
         <div class="val" style="font-size:15px">PT Elevate Property Management</div>
-        <div class="lbl">Amount</div>
+        <div class="lbl">Total to pay</div>
         <div class="amt" id="bank-amt">IDR 50,000</div>
+        <div id="bank-calc" style="font-size:12.5px;color:var(--grey);margin-top:3px">1 seat &times; IDR 50,000</div>
         <button type="button" class="copy" id="copy-acct">Copy account number</button>
       </div>
       <div class="paysteps">
         <b style="font-size:16px">How to complete your registration</b>
         <ol>
-          <li>Transfer the amount above from any Indonesian bank app (BI-FAST works from every bank).</li>
+          <li>Transfer the <b>total shown</b> in one payment, from any Indonesian bank app (BI-FAST works from every bank).</li>
           <li>Use your <b>name</b> as the transfer reference, so we can match the payment to your registration.</li>
           <li>Take a screenshot of the transfer confirmation.</li>
           <li>Upload the screenshot below and submit &mdash; your seat is confirmed straight away.</li>
         </ol>
-        <div style="margin-top:12px;font-size:13.5px;color:var(--grey)">Paying for more than one seat? Transfer the total shown above in a single payment.</div>
       </div>
     </div>
 
@@ -335,11 +335,14 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
     details = collect();
     if (!details) return;
     var seats = parseInt(details.guests, 10) || 1;
+    var total = seats * 50000;
     document.getElementById('summary').innerHTML =
       '<b>' + details.name + '</b> &middot; ' + details.email + '<br>' +
-      seats + ' seat' + (seats > 1 ? 's' : '') + ' &middot; total to pay: <b>' + money(seats * 50000) + '</b>';
+      seats + ' seat' + (seats > 1 ? 's' : '') + ' &middot; total to pay: <b>' + money(total) + '</b>';
     var bankAmt = document.getElementById('bank-amt');
-    if (bankAmt) bankAmt.textContent = money(seats * 50000);
+    if (bankAmt) bankAmt.textContent = money(total);
+    var bankCalc = document.getElementById('bank-calc');
+    if (bankCalc) bankCalc.innerHTML = seats + ' seat' + (seats > 1 ? 's' : '') + ' &times; ' + money(50000);
     form.style.display = 'none';
     step2.style.display = 'block';
     step2.scrollIntoView({ behavior: 'smooth' });
