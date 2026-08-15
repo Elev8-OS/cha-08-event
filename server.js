@@ -48,9 +48,15 @@ app.get('/img/:name', (req, res) => {
 //   A) GHL_WEBHOOK_URL   -> posts the full registration JSON to a GHL inbound webhook
 //   B) GHL_API_TOKEN + GHL_LOCATION_ID -> upserts the contact via the GHL API
 // Optional: GHL_TAG (default "cha-08-event"), GHL_SOURCE (default "CHA-08 landing page")
-const GHL_WEBHOOK_URL = process.env.GHL_WEBHOOK_URL || '';
-const GHL_API_TOKEN = process.env.GHL_API_TOKEN || '';
-const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID || '';
+// Values still holding the PASTE_... placeholder count as "not configured yet",
+// so the site runs normally until the real credentials are filled in.
+const real = (v) => {
+  const s = String(v || '').trim();
+  return (!s || s.startsWith('PASTE_')) ? '' : s;
+};
+const GHL_WEBHOOK_URL = real(process.env.GHL_WEBHOOK_URL);
+const GHL_API_TOKEN = real(process.env.GHL_API_TOKEN);
+const GHL_LOCATION_ID = real(process.env.GHL_LOCATION_ID);
 const GHL_TAG = process.env.GHL_TAG || 'cha-08-event';
 const GHL_SOURCE = process.env.GHL_SOURCE || 'CHA-08 landing page';
 
@@ -218,6 +224,14 @@ app.get('/admin/resync', async (req, res) => {
   res.json({ pending: pending.length, sent, errors });
 });
 
-app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => res.json({
+  ok: true,
+  ghl: GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'not configured'),
+  tag: GHL_TAG,
+}));
 
-app.listen(PORT, () => console.log(`CHA-08 event page running on :${PORT}`));
+app.listen(PORT, () => {
+  const mode = GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'NOT CONFIGURED (still placeholders)');
+  console.log(`CHA-08 event page running on :${PORT}`);
+  console.log(`[ghl] mode: ${mode} | tag: "${GHL_TAG}"`);
+});
