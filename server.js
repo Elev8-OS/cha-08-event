@@ -14,16 +14,31 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 
-// --- Serve images stored as base64 text (keeps repo text-only) ---
+// --- Serve images stored as base64 text (single file or numbered chunks) ---
 const IMG_TYPES = { png: 'image/png', jpg: 'image/jpeg' };
 app.get('/img/:name', (req, res) => {
   const name = String(req.params.name).replace(/[^a-z0-9.]/gi, '');
-  const file = path.join(__dirname, 'assets-b64', name + '.txt');
   const ext = name.split('.').pop();
-  if (!IMG_TYPES[ext] || !fs.existsSync(file)) return res.status(404).end();
-  const buf = Buffer.from(fs.readFileSync(file, 'utf8'), 'base64');
+  if (!IMG_TYPES[ext]) return res.status(404).end();
+  const dir = path.join(__dirname, 'assets-b64');
+  let b64 = null;
+  // Prefer chunked files (name.jpg.0.txt, name.jpg.1.txt, ...) when present
+  const prefix = name + '.';
+  const parts = fs.existsSync(dir)
+    ? fs.readdirSync(dir)
+        .filter((f) => f.startsWith(prefix) && /\.\d+\.txt$/.test(f))
+        .sort((a, b) => parseInt(a.match(/\.(\d+)\.txt$/)[1], 10) - parseInt(b.match(/\.(\d+)\.txt$/)[1], 10))
+    : [];
+  if (parts.length) {
+    b64 = parts.map((p) => fs.readFileSync(path.join(dir, p), 'utf8')).join('');
+  } else {
+    const single = path.join(dir, name + '.txt');
+    if (!fs.existsSync(single)) return res.status(404).end();
+    b64 = fs.readFileSync(single, 'utf8');
+  }
+  const buf = Buffer.from(b64.replace(/\s+/g, ''), 'base64');
   res.setHeader('Content-Type', IMG_TYPES[ext]);
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(buf);
 });
 
