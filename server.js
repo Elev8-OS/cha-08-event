@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const payment = require('./payment');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -186,6 +187,50 @@ function logSync(email, status, detail) {
   } catch (e) { console.error('[ghl] log failed', e.message); }
 }
 
+// --- Payment gateway (dynamic QRIS) --------------------------------------
+// When the gateway is configured, each registration gets its own QRIS with the
+// exact amount, and Midtrans confirms payment by webhook - no screenshots.
+const SEAT_PRICE = parseInt(process.env.SEAT_PRICE || '50000', 10);
+
+function orderIdFor(email) {
+  return 'CHA08-' + Date.now() + '-' + Buffer.from(email).toString('hex').slice(0, 8);
+}
+
+// registrations waiting for payment, keyed by orderId
+const PENDING_FILE = () => path.join(DATA_DIR, 'pending.jsonl');
+function savePending(entry) {
+  fs.appendFileSync(PENDING_FILE(), JSON.stringify(entry) + '\n');
+}
+function findPending(orderId) {
+  if (!fs.existsSync(PENDING_FILE())) return null;
+  const lines = fs.readFileSync(PENDING_FILE(), 'utf8').trim().split('\n').filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try { const r = JSON.parse(lines[i]); if (r.orderId === orderId) return r; } catch {}
+  }
+  return null;
+}
+
+// A paid registration becomes a real registration: stored, tagged, marked paid.
+function confirmPaid(entry) {
+  const already = readAll().some((r) => r.email === entry.email);
+  if (!already) {
+    fs.appendFileSync(DB_FILE, JSON.stringify(entry) + '\n');
+  }
+  fs.appendFileSync(path.join(DATA_DIR, 'payments.jsonl'),
+    JSON.stringify({ ts: new Date().toISOString(), email: entry.email, paid: true, orderId: entry.orderId || '' }) + '\n');
+  console.log('[payment] confirmed', entry.email, entry.orderId || '');
+
+  sendToGHL(entry)
+    .then(async (mode) => {
+      if (mode === 'disabled') return;
+      logSync(entry.email, 'sent', mode);
+      if (GHL_API_TOKEN && GHL_LOCATION_ID) {
+        try { await addGhlTag(entry, GHL_TAG_PAID); } catch (e) { console.error('[ghl] paid tag failed', e.message); }
+      }
+    })
+    .catch((e) => { console.error('[ghl] FAILED', entry.email, e.message); logSync(entry.email, 'failed', e.message); });
+}
+
 // --- RSVP endpoint ---
 app.post('/api/rsvp', (req, res) => {
   const { name, email, phone, company, role, guests, properties, employees, website } = req.body || {};
@@ -200,7 +245,40 @@ app.post('/api/rsvp', (req, res) => {
     return res.status(400).json({ ok: false, error: 'Please provide your WhatsApp number.' });
   }
 
-  // Proof of payment: registration is only accepted once the QRIS screenshot is attached
+  // Gateway path: create a dynamic QRIS and hold the registration until Midtrans confirms
+  if (payment.isEnabled()) {
+    const seats = Math.min(Math.max(parseInt(guests, 10) || 1, 1), 10);
+    const pending = {
+      ts: new Date().toISOString(),
+      name: String(name).trim().slice(0, 120),
+      email: String(email).trim().toLowerCase().slice(0, 160),
+      phone: String(phone || '').trim().slice(0, 40),
+      company: String(company || '').trim().slice(0, 160),
+      role: String(role || '').trim().slice(0, 60),
+      guests: seats,
+      properties: String(properties || '').slice(0, 20),
+      employees: String(employees || '').slice(0, 20),
+      orderId: orderIdFor(String(email).trim().toLowerCase()),
+      ip: (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim(),
+    };
+    return payment.createCharge({
+      orderId: pending.orderId,
+      amount: seats * SEAT_PRICE,
+      customer: { name: pending.name, email: pending.email, phone: pending.phone, seats },
+    }).then((charge) => {
+      savePending(pending);
+      console.log('[payment] charge created', pending.orderId, pending.email, seats * SEAT_PRICE);
+      res.json({
+        ok: true, mode: 'qris', orderId: pending.orderId,
+        amount: seats * SEAT_PRICE, qrImageUrl: charge.qrImageUrl, expiresAt: charge.expiresAt,
+      });
+    }).catch((e) => {
+      console.error('[payment] charge failed', e.message);
+      res.status(502).json({ ok: false, error: 'We could not start the payment. Please try again or contact us on WhatsApp.' });
+    });
+  }
+
+  // Fallback path: static QRIS plus a screenshot of the transfer
   let proofFile = '';
   if (PAYMENT_REQUIRED) {
     if (!req.body.proof) {
@@ -276,7 +354,7 @@ app.get('/admin', (req, res) => {
     const isPaid = paid.get(r.email) === true;
     const proof = r.proofFile
       ? `<a href="/admin/proof?key=${k}&file=${encodeURIComponent(r.proofFile)}" target="_blank">view</a>`
-      : '<span style="color:#999">none</span>';
+      : (r.orderId ? '<span style="color:#999">auto</span>' : '<span style="color:#999">none</span>');
     const action = isPaid
       ? '<span style="color:#137333;font-weight:600">PAID</span>'
       : `<a href="/admin/verify?key=${k}&email=${encodeURIComponent(r.email)}">mark paid</a>`;
@@ -296,9 +374,9 @@ app.get('/admin.csv', (req, res) => {
   const rows = readAll();
   const csvEsc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
   const paid = paidSet();
-  const csv = ['ts,name,email,phone,company,role,properties,employees,guests,paid,proof_file']
+  const csv = ['ts,name,email,phone,company,role,properties,employees,guests,paid,proof_file,order_id']
     .concat(rows.map((r) => [r.ts, r.name, r.email, r.phone, r.company, r.role, r.properties, r.employees, r.guests,
-      paid.get(r.email) === true ? 'yes' : 'no', r.proofFile || ''].map(csvEsc).join(',')))
+      paid.get(r.email) === true ? 'yes' : 'no', r.proofFile || '', r.orderId || ''].map(csvEsc).join(',')))
     .join('\n');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="registrations.csv"');
@@ -323,6 +401,43 @@ app.get('/admin/resync', async (req, res) => {
     catch (e) { logSync(entry.email, 'failed', e.message); errors.push(entry.email + ': ' + e.message); }
   }
   res.json({ pending: pending.length, sent, errors });
+});
+
+// Midtrans calls this when a payment settles. Public endpoint - every payload
+// is signature-checked inside payment.readNotification.
+app.post('/api/payment/webhook', (req, res) => {
+  let note;
+  try {
+    note = payment.readNotification(req.body);
+  } catch (e) {
+    console.error('[payment] rejected notification:', e.message);
+    return res.status(403).json({ ok: false });
+  }
+  console.log('[payment] webhook', note.orderId, note.raw, '->', note.status);
+  if (note.status === 'paid') {
+    const pending = findPending(note.orderId);
+    if (pending) confirmPaid(pending);
+    else console.error('[payment] no pending registration for', note.orderId);
+  }
+  res.json({ ok: true });
+});
+
+// The browser polls this while the QR is on screen
+app.get('/api/payment/status', async (req, res) => {
+  const orderId = String(req.query.order || '');
+  if (!orderId) return res.status(400).json({ ok: false });
+  const pending = findPending(orderId);
+  const email = pending ? pending.email : '';
+  if (email && paidSet().get(email) === true) return res.json({ ok: true, status: 'paid' });
+
+  // Webhook may be delayed or blocked: ask Midtrans directly
+  try {
+    const st = await payment.checkStatus(orderId);
+    if (st.status === 'paid' && pending) confirmPaid(pending);
+    return res.json({ ok: true, status: st.status });
+  } catch (e) {
+    return res.json({ ok: true, status: 'pending' });
+  }
 });
 
 // Serve a payment screenshot (admin only - these contain personal data)
@@ -357,12 +472,15 @@ app.get('/health', (_req, res) => res.json({
   ok: true,
   ghl: GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'not configured'),
   tag: GHL_TAG,
-  payment: PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via QRIS (proof required)' : 'disabled',
+  payment: payment.isEnabled() ? payment.mode() + ' (automatic QRIS)' : (PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via QRIS (proof required)' : 'disabled'),
+  seatPrice: SEAT_PRICE,
 }));
 
 app.listen(PORT, () => {
   const mode = GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'NOT CONFIGURED (still placeholders)');
   console.log(`CHA-08 event page running on :${PORT}`);
   console.log(`[ghl] mode: ${mode} | tag: "${GHL_TAG}"`);
-  console.log(`[payment] ${PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via QRIS, proof required' : 'disabled'}`);
+  console.log(`[payment] ${payment.isEnabled()
+    ? payment.mode() + ' - automatic QRIS, IDR ' + SEAT_PRICE + ' per seat'
+    : (PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via QRIS, screenshot required' : 'disabled')}`);
 });
