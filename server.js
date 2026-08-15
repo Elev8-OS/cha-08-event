@@ -59,6 +59,7 @@ const GHL_API_TOKEN = real(process.env.GHL_API_TOKEN);
 const GHL_LOCATION_ID = real(process.env.GHL_LOCATION_ID);
 const GHL_TAG = process.env.GHL_TAG || 'cha-08-event';
 const GHL_SOURCE = process.env.GHL_SOURCE || 'CHA-08 landing page';
+const GHL_API_BASE = process.env.GHL_API_BASE || 'https://services.leadconnectorhq.com';
 
 function splitName(full) {
   const parts = String(full).trim().split(/\s+/);
@@ -77,14 +78,19 @@ async function sendToGHL(entry) {
   }
   if (GHL_API_TOKEN && GHL_LOCATION_ID) {
     const { firstName, lastName } = splitName(entry.name);
-    const r = await fetch('https://services.leadconnectorhq.com/contacts/upsert', {
+    const headers = {
+      Authorization: 'Bearer ' + GHL_API_TOKEN,
+      Version: '2021-07-28',
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+
+    // Step 1: create or update the contact WITHOUT tags.
+    // The upsert endpoint replaces the whole tag list, so sending tags here
+    // would wipe any tags an existing contact already has.
+    const up = await fetch(GHL_API_BASE + '/contacts/upsert', {
       method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + GHL_API_TOKEN,
-        Version: '2021-07-28',
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         locationId: GHL_LOCATION_ID,
         firstName, lastName,
@@ -93,10 +99,22 @@ async function sendToGHL(entry) {
         phone: entry.phone,
         companyName: entry.company || undefined,
         source: GHL_SOURCE,
-        tags: [GHL_TAG],
       }),
     });
-    if (!r.ok) throw new Error('api HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
+    if (!up.ok) throw new Error('api upsert HTTP ' + up.status + ' ' + (await up.text()).slice(0, 200));
+
+    const body = await up.json().catch(() => ({}));
+    const contactId = body?.contact?.id || body?.id || body?.contact?.contactId;
+    if (!contactId) throw new Error('api upsert returned no contact id');
+
+    // Step 2: append our tag - existing tags stay untouched.
+    const tg = await fetch(GHL_API_BASE + '/contacts/' + contactId + '/tags', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ tags: [GHL_TAG] }),
+    });
+    if (!tg.ok) throw new Error('api tag HTTP ' + tg.status + ' ' + (await tg.text()).slice(0, 200));
+
     return 'api';
   }
   return 'disabled';
