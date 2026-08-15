@@ -63,10 +63,12 @@ const GHL_SOURCE = process.env.GHL_SOURCE || 'CHA-08 landing page';
 const GHL_API_BASE = process.env.GHL_API_BASE || 'https://services.leadconnectorhq.com';
 const GHL_TAG_PAID = process.env.GHL_TAG_PAID || (GHL_TAG + ' - Paid');
 
-// --- Payment (QRIS) -------------------------------------------------------
+// --- Payment --------------------------------------------------------------
 // PAYMENT_REQUIRED=false disables the proof-of-payment step entirely.
+// Without a gateway configured, attendees pay by bank transfer and upload a screenshot.
 const PAYMENT_REQUIRED = String(process.env.PAYMENT_REQUIRED || 'true').toLowerCase() !== 'false';
 const PAYMENT_AMOUNT = process.env.PAYMENT_AMOUNT || 'IDR 50,000';
+const PAYMENT_METHOD = process.env.PAYMENT_METHOD || 'bank transfer';
 const PROOF_DIR = path.join(DATA_DIR, 'proofs');
 fs.mkdirSync(PROOF_DIR, { recursive: true });
 
@@ -278,7 +280,7 @@ app.post('/api/rsvp', (req, res) => {
     });
   }
 
-  // Fallback path: static QRIS plus a screenshot of the transfer
+  // Fallback path: bank transfer plus a screenshot of the payment
   let proofFile = '';
   if (PAYMENT_REQUIRED) {
     if (!req.body.proof) {
@@ -472,7 +474,7 @@ app.get('/health', (_req, res) => res.json({
   ok: true,
   ghl: GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'not configured'),
   tag: GHL_TAG,
-  payment: payment.isEnabled() ? payment.mode() + ' (automatic QRIS)' : (PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via QRIS (proof required)' : 'disabled'),
+  payment: payment.isEnabled() ? payment.mode() + ' (automatic QRIS)' : (PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via ' + PAYMENT_METHOD + ' (proof required)' : 'disabled'),
   seatPrice: SEAT_PRICE,
 }));
 
@@ -482,5 +484,5 @@ app.listen(PORT, () => {
   console.log(`[ghl] mode: ${mode} | tag: "${GHL_TAG}"`);
   console.log(`[payment] ${payment.isEnabled()
     ? payment.mode() + ' - automatic QRIS, IDR ' + SEAT_PRICE + ' per seat'
-    : (PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via QRIS, screenshot required' : 'disabled')}`);
+    : (PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via ' + PAYMENT_METHOD + ', screenshot required' : 'disabled')}`);
 });
