@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 
 function mount(app, deps) {
-  const { DATA_DIR, guard, readAll, paidSet, addGhlTag, ATTENDED_TAG, ghlReady } = deps;
+  const { DATA_DIR, guard, readAll, paidSet, addGhlTag, ATTENDED_TAG, ghlReady, addWalkin } = deps;
   const FILE = () => path.join(DATA_DIR, 'checkins.jsonl');
 
   // Latest entry per email wins, so an accidental check-in can be undone
@@ -36,6 +36,7 @@ function mount(app, deps) {
         company: r.company || '',
         seats: r.guests || 1,
         paid: paid.get(r.email) === true,
+        walkin: Boolean(r.walkin),
         arrived: Boolean(a && a.arrived),
         at: a && a.arrived ? a.ts.slice(11, 16) : '',
       };
@@ -66,6 +67,38 @@ function mount(app, deps) {
     if (arrived && ghlReady()) {
       try { await addGhlTag(entry, ATTENDED_TAG); } catch (e) { console.error('[checkin] tag failed', e.message); }
     }
+  });
+
+  // Someone turns up who never registered: a colleague brought along, a CHA
+  // member walking in. The desk must be able to take them without leaving the page.
+  app.post('/checkin/walkin', async (req, res) => {
+    if (!guard(req, res)) return;
+    const b = req.body || {};
+    const name = String(b.name || '').trim().slice(0, 120);
+    if (!name) return res.status(400).json({ ok: false, error: 'Name is required.' });
+
+    const email = String(b.email || '').trim().toLowerCase().slice(0, 160);
+    const entry = {
+      ts: new Date().toISOString(),
+      name,
+      email: email || ('walkin-' + Date.now() + '@cha-08.local'),
+      phone: String(b.phone || '').trim().slice(0, 40),
+      company: String(b.company || '').trim().slice(0, 160),
+      guests: Math.min(Math.max(parseInt(b.seats, 10) || 1, 1), 10),
+      role: '', properties: '', employees: '', pms: '', pain: '',
+      proofFile: '',
+      walkin: true,
+    };
+
+    if (readAll().some((r) => r.email === entry.email)) {
+      return res.status(409).json({ ok: false, error: 'Already on the list \u2014 search for them instead.' });
+    }
+
+    addWalkin(entry);
+    fs.appendFileSync(FILE(), JSON.stringify({ ts: entry.ts, email: entry.email, arrived: true }) + '\n');
+    console.log('[checkin] walk-in', entry.name, entry.company);
+
+    res.json({ ok: true, name: entry.name });
   });
 
   app.get('/checkin', (req, res) => {
@@ -118,10 +151,31 @@ header img{height:34px} header img.c{height:50px}
 .g .meta{font-size:13.5px;color:var(--grey);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .g .seats{font-size:12px;font-weight:700;background:#F2EEE5;border-radius:20px;padding:3px 10px;display:inline-block;margin-top:5px}
 .g .unpaid{background:#FDF0E6;color:#8a5a1f}
+.g .walkin{background:#E8F0FB;color:#2c5282;margin-left:5px}
 .mark{width:52px;height:52px;border-radius:50%;border:2px solid #ddd;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;font-size:24px;color:#bbb;background:#fff}
 .g.in .mark{background:var(--green);border-color:var(--green);color:#fff}
 .empty{padding:40px 22px;text-align:center;color:var(--grey)}
+.fab{position:fixed;right:22px;bottom:22px;z-index:15;background:var(--ink);color:#fff;border:0;
+  border-radius:30px;padding:16px 24px;font:inherit;font-weight:700;font-size:16px;cursor:pointer;
+  box-shadow:0 6px 20px rgba(0,0,0,.25);margin-bottom:env(safe-area-inset-bottom)}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:40;display:none;
+  align-items:center;justify-content:center;padding:20px}
+.sheet.on{display:flex}
+.sheet .card{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:440px;
+  max-height:90vh;overflow-y:auto}
+.sheet h2{font-family:'Archivo Black',sans-serif;font-size:20px}
+.sheet p{color:var(--grey);font-size:14px;margin-top:6px}
+.sheet input,.sheet select{width:100%;padding:13px 12px;border:1px solid #d8d2c4;border-radius:10px;
+  font:inherit;font-size:16px;background:#FCFBF8;margin-top:10px}
+.seats-l{display:block;font-size:13.5px;font-weight:600;color:var(--grey);margin-top:12px}
+.sheet .err{display:none;color:#a33;font-size:14px;margin-top:10px}
+.sheet .acts{display:flex;gap:10px;align-items:center;margin-top:18px}
+.sheet .go{flex:1;background:var(--ink);color:#fff;border:0;border-radius:10px;padding:15px;
+  font:inherit;font-weight:700;font-size:16px;cursor:pointer}
+.sheet .go:disabled{opacity:.6;cursor:wait}
+.sheet .cancel{background:none;border:0;color:var(--grey);font:inherit;font-weight:600;
+  padding:15px 8px;cursor:pointer}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(120%);
   background:#111;color:#fff;padding:14px 22px;border-radius:12px;font-weight:600;
   transition:transform .25s;z-index:20;display:flex;align-items:center;gap:16px}
@@ -144,6 +198,27 @@ header img{height:34px} header img.c{height:50px}
 <div class="search"><input id="q" placeholder="Search name or property\u2026" autocomplete="off"></div>
 <div class="list" id="list"></div>
 <div class="empty" id="empty" style="display:none">No matching guest.</div>
+<button class="fab" id="fab">+ Walk-in</button>
+
+<div class="sheet" id="sheet">
+  <div class="card">
+    <h2>Add a walk-in</h2>
+    <p>They are not on the list. This registers them and marks them as arrived.</p>
+    <input id="w-name" placeholder="Full name *" autocomplete="off">
+    <input id="w-company" placeholder="Property / company" autocomplete="off">
+    <input id="w-phone" placeholder="WhatsApp number" inputmode="tel" autocomplete="off">
+    <input id="w-email" placeholder="Email" inputmode="email" autocomplete="off">
+    <label class="seats-l">Seats
+      <select id="w-seats"><option>1</option><option>2</option><option>3</option><option>4</option></select>
+    </label>
+    <div class="err" id="w-err"></div>
+    <div class="acts">
+      <button class="go" id="w-save">Add &amp; check in</button>
+      <button class="cancel" id="w-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"><span id="toast-text"></span><button id="undo">Undo</button></div>
 
 <script>
@@ -162,7 +237,8 @@ function render() {
       + '<div class="info"><div class="nm">' + esc(g.name) + '</div>'
       + '<div class="meta">' + esc(g.company || g.email) + '</div>'
       + '<span class="seats' + (g.paid ? '' : ' unpaid') + '">' + g.seats + ' seat' + (g.seats > 1 ? 's' : '')
-      + (g.paid ? '' : ' \\u00b7 unpaid') + (g.arrived ? ' \\u00b7 ' + g.at : '') + '</span></div>'
+      + (g.paid ? '' : ' \\u00b7 unpaid') + (g.arrived ? ' \\u00b7 ' + g.at : '') + '</span>'
+      + (g.walkin ? '<span class="seats walkin">walk-in</span>' : '') + '</div>'
       + '<div class="mark">' + (g.arrived ? '\\u2713' : '') + '</div></div>';
   }).join('');
   document.getElementById('empty').style.display = shown.length ? 'none' : 'block';
@@ -223,6 +299,49 @@ document.getElementById('list').addEventListener('click', function (e) {
 document.getElementById('undo').addEventListener('click', function () {
   if (lastUndo) lastUndo();
   document.getElementById('toast').classList.remove('show');
+});
+
+// --- walk-in sheet ---
+var sheet = document.getElementById('sheet');
+function closeSheet() {
+  sheet.classList.remove('on');
+  ['w-name', 'w-company', 'w-phone', 'w-email'].forEach(function (id) { document.getElementById(id).value = ''; });
+  document.getElementById('w-seats').value = '1';
+  document.getElementById('w-err').style.display = 'none';
+}
+document.getElementById('fab').addEventListener('click', function () {
+  sheet.classList.add('on');
+  document.getElementById('w-name').focus();
+});
+document.getElementById('w-cancel').addEventListener('click', closeSheet);
+sheet.addEventListener('click', function (e) { if (e.target === sheet) closeSheet(); });
+
+document.getElementById('w-save').addEventListener('click', async function () {
+  var err = document.getElementById('w-err');
+  var name = document.getElementById('w-name').value.trim();
+  err.style.display = 'none';
+  if (!name) { err.textContent = 'Please enter a name.'; err.style.display = 'block'; return; }
+  this.disabled = true; this.textContent = 'Adding\\u2026';
+  try {
+    var r = await fetch('/checkin/walkin?key=' + KEY, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        company: document.getElementById('w-company').value,
+        phone: document.getElementById('w-phone').value,
+        email: document.getElementById('w-email').value,
+        seats: document.getElementById('w-seats').value,
+      }),
+    });
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Could not add.');
+    closeSheet();
+    toast(d.name + ' \\u2014 added and checked in', null);
+    load();
+  } catch (ex) {
+    err.textContent = ex.message; err.style.display = 'block';
+  }
+  this.disabled = false; this.textContent = 'Add & check in';
 });
 
 document.getElementById('q').addEventListener('input', render);
