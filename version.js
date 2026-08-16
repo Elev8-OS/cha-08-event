@@ -8,9 +8,22 @@
  * Bump VERSION whenever behaviour changes, and add the entry at the top.
  */
 
-const VERSION = '1.7.1';
+const VERSION = '1.7.2';
 
 const CHANGELOG = [
+  {
+    v: '1.7.2', date: '2026-08-16', title: 'Publishing without a developer',
+    items: [
+      'Slide decks are uploaded from the admin and assigned to a session. '
+        + 'They land on the volume, so a deploy cannot wipe them, and appear on '
+        + 'the public slides page immediately.',
+      'Reception guide in German, English and Indonesian, printable from the browser.',
+      'All three logos on the name badges.',
+      'Projected screens: equal cells for the logos, so the middle one is '
+        + 'actually centred rather than only evenly spaced.',
+      'Upload buttons line up across a row regardless of how long a speaker line runs.',
+    ],
+  },
   {
     v: '1.7.1', date: '2026-08-16', title: 'Counting and finding things',
     items: [

@@ -148,7 +148,10 @@ function page(k, sessions, map) {
   h1{font-size:20px;margin:6px 0 4px}
   .lead{color:#666;font-size:14px;margin-bottom:18px}
   .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
-  .s{background:#fff;border:1px solid #e5e0d5;border-radius:14px;padding:16px 18px}
+  /* Cards stretch to the tallest in the row; without this the button sits
+     wherever the speaker line happens to end. */
+  .s{background:#fff;border:1px solid #e5e0d5;border-radius:14px;padding:16px 18px;
+    display:flex;flex-direction:column}
   .s.has{background:#F7FCF8;border-color:#cfe8d4}
   .s h3{font-size:16.5px}
   .sp{font-size:13px;color:#8A6D2F;font-weight:600;margin-top:3px}
@@ -156,7 +159,7 @@ function page(k, sessions, map) {
   .state a{color:#111;font-weight:600}
   .meta{display:block;font-size:12.5px;color:#999;margin-top:3px}
   .none{color:#999}
-  .acts{display:flex;gap:9px;align-items:center;margin-top:14px;flex-wrap:wrap}
+  .acts{display:flex;gap:9px;align-items:center;margin-top:auto;padding-top:14px;flex-wrap:wrap}
   .pick{background:#F6BB12;border-radius:9px;padding:11px 16px;font-size:14px;font-weight:700;
     cursor:pointer;display:inline-block}
   .rm{background:#fff;border:1px solid #e3bcbc;color:#a33;border-radius:9px;padding:11px 14px;
