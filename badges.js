@@ -1,15 +1,16 @@
 /**
  * Printable name badges, straight from the registration list.
  *
- * A4, ten badges per sheet at 90x54 mm - the standard badge-holder size, so
- * they fit the plastic sleeves sold in any Bali stationery shop. Print at
- * 100% scale with margins off; the cut guides sit on the page edges.
+ * A4, four badges per sheet at 70x105 mm portrait - the paper size that fits
+ * the lanyard pouches we ordered. Three columns would need exactly 210 mm and
+ * leave nothing for the printer's unprintable edge, so two by two it is, with
+ * room for scissors between them.
  *
  * Multi-seat registrations get one badge per seat: the extra ones carry the
  * company only, because we never asked for the colleagues' names.
  */
 
-const PER_SHEET = 10;
+const PER_SHEET = 4;
 
 function mount(app, deps) {
   const { guard, readAll, paidSet } = deps;
@@ -42,10 +43,10 @@ function esc(s) {
 // Long names have to shrink rather than overflow the badge
 function nameSize(n) {
   const len = String(n).length;
-  if (len > 26) return '15px';
-  if (len > 20) return '17px';
-  if (len > 15) return '19px';
-  return '21px';
+  if (len > 26) return '20px';
+  if (len > 20) return '24px';
+  if (len > 15) return '28px';
+  return '32px';
 }
 
 function page(k, badges, onlyPaid) {
@@ -65,16 +66,18 @@ body{font-family:Inter,system-ui,sans-serif;background:#F7F4EE;color:#111}
 .acts a,.acts button{padding:11px 16px;border-radius:9px;font:inherit;font-size:14px;font-weight:600;
   text-decoration:none;border:1px solid #ddd;background:#fff;color:#333;cursor:pointer}
 .acts .print{background:#111;color:#fff;border-color:#111}
-.sheet{background:#fff;width:210mm;min-height:297mm;margin:18px auto;padding:10mm 10mm;
-  display:grid;grid-template-columns:90mm 90mm;grid-auto-rows:54mm;gap:5mm 10mm;
-  align-content:start;box-shadow:0 4px 20px rgba(0,0,0,.08)}
-.badge{border:1px dashed #ccc;border-radius:3mm;padding:6mm 5mm;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;text-align:center;overflow:hidden;page-break-inside:avoid}
-.badge .logo{height:7mm;margin-bottom:3mm}
-.badge .nm{font-family:'Archivo Black',sans-serif;line-height:1.15;word-break:break-word}
-.badge .co{font-size:12px;color:#555;margin-top:2mm;line-height:1.25;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.badge .ev{font-size:7.5px;letter-spacing:.7px;color:#C9A24B;font-weight:700;margin-top:auto;padding-top:3mm}
+.sheet{background:#fff;width:210mm;min-height:297mm;margin:18px auto;padding:16mm 14mm;
+  display:grid;grid-template-columns:70mm 70mm;grid-auto-rows:105mm;gap:12mm 10mm;
+  justify-content:center;align-content:start;box-shadow:0 4px 20px rgba(0,0,0,.08)}
+.badge{border:1px dashed #ccc;padding:9mm 6mm;display:flex;flex-direction:column;
+  align-items:center;text-align:center;overflow:hidden;page-break-inside:avoid}
+.badge .logo{height:9mm}
+.badge .nm{font-family:'Archivo Black',sans-serif;line-height:1.12;word-break:break-word;
+  margin-top:auto}
+.badge .co{font-size:13px;color:#555;margin-top:3mm;line-height:1.3;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.badge .rule{width:16mm;height:1mm;background:#F6BB12;margin:5mm 0 auto 0}
+.badge .ev{font-size:8px;letter-spacing:.8px;color:#C9A24B;font-weight:700;line-height:1.4}
 .empty{background:#fff;border:1px dashed #d8d2c4;border-radius:14px;padding:40px;text-align:center;color:#666;
   max-width:900px;margin:18px auto}
 @media print{
@@ -88,7 +91,7 @@ body{font-family:Inter,system-ui,sans-serif;background:#F7F4EE;color:#111}
 
 <div class="toolbar">
   <h1>Name badges: ${badges.length} &middot; ${sheets} sheet${sheets > 1 ? 's' : ''}</h1>
-  <p>A4, ten per sheet at 90&times;54&nbsp;mm \u2014 standard badge-holder size.
+  <p>A4, four per sheet at 70&times;105&nbsp;mm portrait \u2014 the paper size for our lanyard pouches.
      Print at <b>100% scale</b> with margins set to none, then cut along the dashed lines.
      Registrations with several seats get one badge per seat.</p>
   <div class="acts">
@@ -105,7 +108,8 @@ ${badges.length
         <img class="logo" src="/img/elev8.jpg" alt="">
         <div class="nm" style="font-size:${nameSize(b.name)}">${esc(b.name)}</div>
         <div class="co">${esc(b.company)}</div>
-        <div class="ev">SMARTER REVENUE, BETTER TECH &middot; 28 AUG</div>
+        <div class="rule"></div>
+        <div class="ev">SMARTER REVENUE, BETTER TECH<br>28 AUGUST 2026 &middot; OXO THE FACTORY</div>
       </div>`).join('')}</div>`).join('')
     : '<div class="empty">No registrations to print yet.</div>'}
 
