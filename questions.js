@@ -5,12 +5,14 @@
  * they did not want to ask in front of eighty others. The moderator sees them
  * sorted by how many people wanted the same thing asked.
  *
- * Two decisions worth stating:
+ * Three decisions worth stating:
  *
  * - Upvotes, not just a list. With forty questions the moderator needs to know
  *   which three matter, and the room is a better judge of that than we are.
  * - Names optional. The whole point is that shy questions arrive; requiring a
  *   name would filter out exactly the ones worth asking.
+ * - Duplicates are caught while typing. Nobody reads eighty questions to check
+ *   whether theirs is already there, so the page checks for them.
  *
  * Self-contained on purpose: it reads its own configuration from the
  * environment so it can be added without touching server.js during the run-up
@@ -165,6 +167,15 @@ h2{font-size:15px;margin:28px 0 10px;color:var(--grey)}
 .up.on{background:var(--gold);border-color:var(--gold)}
 .up span{display:block;font-size:11px;font-weight:600;color:#777}
 .up.on span{color:#6b5200}
+.similar{display:none;background:#FCF6E6;border:1px solid #E8DCB8;border-left:4px solid var(--gold);
+  border-radius:12px;padding:15px 16px;margin-top:14px}
+.similar b{font-size:14.5px}
+.similar .hint{font-size:13px;color:var(--grey);margin-top:3px}
+.sq{background:#fff;border:1px solid #e8dcb8;border-radius:10px;padding:11px 13px;margin-top:10px;
+  display:flex;gap:10px;align-items:flex-start}
+.sq p{flex:1;font-size:14.5px;line-height:1.4}
+.dismiss{width:100%;margin-top:12px;background:none;border:0;color:var(--grey);font:inherit;
+  font-size:13px;font-weight:600;text-decoration:underline;cursor:pointer;padding:6px}
 footer{text-align:center;font-size:13px;color:var(--grey);margin-top:34px}
 </style></head><body>
 <div class="wrap">
@@ -175,6 +186,14 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:34px}
   <form id="f">
     <label for="text">Your question</label>
     <textarea id="text" placeholder="What would you actually like to know?"></textarea>
+
+    <div class="similar" id="similar">
+      <b>Someone may have asked this already</b>
+      <p class="hint">Backing a question gets it answered sooner than asking it twice.</p>
+      <div id="similar-list"></div>
+      <button type="button" class="dismiss" id="dismiss">No, mine is different &mdash; let me send it</button>
+    </div>
+
     <select id="session">
       <option value="">Which session? (optional)</option>
       ${SESSIONS.map((s) => `<option>${esc(s)}</option>`).join('')}
@@ -196,15 +215,64 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:34px}
 
 <script>
 (function () {
-  var voted = {};
+  var voted = {}, all = [], dismissed = false;
   try { voted = JSON.parse(localStorage.getItem('cha08_voted') || '{}'); } catch (e) {}
 
   function esc(s){ return String(s||'').replace(/[<>&]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;'}[c]; }); }
+
+  // Nobody reads eighty questions to check whether theirs is already there.
+  // So we do it for them: overlap of meaningful words, ignoring the filler
+  // that every question contains anyway.
+  var STOP = ('a an the is are was were do does did how what when where why who which '
+    + 'to of in on for with and or if it its this that we you your our my i can could '
+    + 'should would will shall have has had be been being at as by from about not no '
+    + 'yes there their them they he she his her me us so than then too very just');
+  var STOPSET = {};
+  STOP.split(' ').forEach(function (w) { STOPSET[w] = 1; });
+
+  function words(s) {
+    return String(s).toLowerCase()
+      .replace(/[^a-z0-9\\s]/g, ' ')
+      .split(/\\s+/)
+      .filter(function (w) { return w.length > 2 && !STOPSET[w]; })
+      // Crude stemming, but enough: "reporting" and "report" are the same
+      // question, and a real stemmer is not worth 30 KB on a phone.
+      .map(function (w) { return w.replace(/(ings|ing|ies|ed|es|s)$/, ''); });
+  }
+
+  function similarity(a, b) {
+    var A = words(a), B = words(b);
+    if (!A.length || !B.length) return 0;
+    var setB = {}, hits = 0, seen = {};
+    B.forEach(function (w) { setB[w] = 1; });
+    A.forEach(function (w) { if (setB[w] && !seen[w]) { seen[w] = 1; hits++; } });
+    // Dice coefficient: forgiving about one question being longer than the other
+    return (2 * hits) / (A.length + B.length);
+  }
+
+  function suggest() {
+    var text = document.getElementById('text').value;
+    var box = document.getElementById('similar');
+    if (dismissed || words(text).length < 2) { box.style.display = 'none'; return; }
+    var hits = all.map(function (q) { return { q: q, s: similarity(text, q.text) }; })
+      .filter(function (x) { return x.s >= 0.28; })
+      .sort(function (x, y) { return y.s - x.s; })
+      .slice(0, 3);
+    if (!hits.length) { box.style.display = 'none'; return; }
+    document.getElementById('similar-list').innerHTML = hits.map(function (x) {
+      var on = voted[x.q.id] ? ' on' : '';
+      return '<div class="sq"><p>' + esc(x.q.text) + '</p>'
+        + '<button type="button" class="up' + on + '" data-id="' + x.q.id + '">' + x.q.votes
+        + '<span>' + (voted[x.q.id] ? 'backed' : 'back it') + '</span></button></div>';
+    }).join('');
+    box.style.display = 'block';
+  }
 
   async function load() {
     try {
       var r = await fetch('/api/questions/list', { cache: 'no-store' });
       var d = await r.json();
+      all = d.questions;
       var list = document.getElementById('list');
       document.getElementById('listhead').style.display = d.questions.length ? 'block' : 'none';
       list.innerHTML = d.questions.map(function (q) {
@@ -212,21 +280,21 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:34px}
         return '<div class="q"><p>' + esc(q.text)
           + '<span class="who">' + (q.session ? esc(q.session) : 'General')
           + (q.name ? ' \\u00b7 ' + esc(q.name) : '') + '</span></p>'
-          + '<button class="up' + on + '" data-id="' + q.id + '">' + q.votes
+          + '<button type="button" class="up' + on + '" data-id="' + q.id + '">' + q.votes
           + '<span>' + (voted[q.id] ? 'backed' : 'back it') + '</span></button></div>';
       }).join('');
+      suggest();
     } catch (e) { /* leave what is there */ }
   }
 
-  document.getElementById('list').addEventListener('click', async function (e) {
-    var b = e.target.closest('.up');
-    if (!b) return;
+  async function back(b) {
     var id = b.getAttribute('data-id');
     if (voted[id]) return;                       // one voice per device
     voted[id] = 1;
     try { localStorage.setItem('cha08_voted', JSON.stringify(voted)); } catch (err) {}
     b.classList.add('on');
     b.firstChild.nodeValue = String(parseInt(b.textContent, 10) + 1);
+    b.querySelector('span').textContent = 'backed';
     try {
       await fetch('/api/questions/vote', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -234,6 +302,29 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:34px}
       });
     } catch (err) {}
     load();
+  }
+
+  document.getElementById('list').addEventListener('click', function (e) {
+    var b = e.target.closest('.up');
+    if (b) back(b);
+  });
+
+  // Backing from inside the panel counts the same as backing from the list
+  document.getElementById('similar-list').addEventListener('click', function (e) {
+    var b = e.target.closest('.up');
+    if (b) back(b);
+  });
+
+  var typingTimer = null;
+  document.getElementById('text').addEventListener('input', function () {
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(suggest, 350);      // wait for a pause, not every keystroke
+  });
+
+  document.getElementById('dismiss').addEventListener('click', function () {
+    dismissed = true;
+    document.getElementById('similar').style.display = 'none';
+    document.getElementById('text').focus();
   });
 
   document.getElementById('send').addEventListener('click', async function () {
@@ -255,6 +346,8 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:34px}
       var d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Could not send.');
       document.getElementById('text').value = '';
+      document.getElementById('similar').style.display = 'none';
+      dismissed = false;
       document.getElementById('ok').style.display = 'block';
       setTimeout(function () { document.getElementById('ok').style.display = 'none'; }, 4000);
       load();
