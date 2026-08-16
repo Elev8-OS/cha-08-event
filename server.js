@@ -566,11 +566,16 @@ app.get('/admin', (req, res) => {
     </article>`;
   }).join('');
 
-  const seats = rows.reduce((a, r) => a + (r.guests || 1), 0);
-  const compCount = rows.filter((r) => comps.has(r.email)).length;
-  const paidCount = rows.filter((r) => paid.get(r.email) === true && !comps.has(r.email)).length;
-  const revenue = rows.filter((r) => !comps.has(r.email))
-    .reduce((a, r) => a + (r.guests || 1) * SEAT_PRICE, 0);
+  // Seats throughout, not a mix of seats and registrations: a complimentary
+  // booking of two seats used to show up as "1 complimentary".
+  const seatsOf = (r) => parseInt(r.guests, 10) || 1;
+  const seats = rows.reduce((a, r) => a + seatsOf(r), 0);
+  const compSeats = rows.filter((r) => comps.has(r.email)).reduce((a, r) => a + seatsOf(r), 0);
+  const paidSeats = rows.filter((r) => paid.get(r.email) === true && !comps.has(r.email))
+    .reduce((a, r) => a + seatsOf(r), 0);
+  const unpaidSeats = seats - compSeats - paidSeats;
+  // Only seats that are actually owed count as revenue
+  const revenue = rows.filter((r) => !comps.has(r.email)).reduce((a, r) => a + seatsOf(r) * SEAT_PRICE, 0);
 
   const waitlist = fs.existsSync(WAITLIST_FILE())
     ? fs.readFileSync(WAITLIST_FILE(), 'utf8').trim().split('\n').filter(Boolean)
@@ -598,11 +603,14 @@ app.get('/admin', (req, res) => {
   body{font-family:Inter,system-ui,sans-serif;background:var(--cream);color:#111;padding:18px;
     padding-bottom:calc(110px + env(safe-area-inset-bottom))}
   h1{font-size:19px;line-height:1.35}
-  h1 small{display:block;font-size:13.5px;color:var(--grey);font-weight:500;margin-top:3px}
+  h1 small{display:block;font-size:13.5px;color:var(--grey);font-weight:500;margin-top:3px;line-height:1.5}
   h1 .ver{font-size:11.5px;font-weight:600;letter-spacing:.5px;color:var(--grey);
     background:#EFEAE0;border-radius:20px;padding:3px 9px;text-decoration:none;vertical-align:middle}
-  .bar{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}
-  .btn{flex:1 1 auto;text-align:center;padding:11px 14px;border-radius:9px;font-size:14px;
+  .bar{display:flex;gap:10px 18px;margin:16px 0 20px;flex-wrap:wrap;align-items:flex-end}
+  .grp{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .lbl{flex-basis:100%;font-size:10.5px;font-weight:700;letter-spacing:1.2px;
+    text-transform:uppercase;color:#a09884;margin-bottom:-2px}
+  .btn{text-align:center;padding:11px 14px;border-radius:9px;font-size:14px;
     font-weight:600;text-decoration:none;white-space:nowrap}
   .btn.primary{background:#111;color:#fff}
   .btn.ghost{background:#fff;color:#333;border:1px solid #ddd}
@@ -656,26 +664,42 @@ app.get('/admin', (req, res) => {
   .wl div{flex:1;min-width:200px;overflow-wrap:anywhere}
   .wl span{color:var(--grey)}
   .wl a{color:#111}
-  @media(max-width:600px){body{padding:14px;padding-bottom:calc(120px + env(safe-area-inset-bottom))}.btn{flex:1 1 46%}}
+  @media(max-width:600px){body{padding:14px;padding-bottom:calc(120px + env(safe-area-inset-bottom))}
+    .bar{gap:14px}.grp{gap:6px}.btn{flex:1 1 46%;padding:11px 10px}}
   </style></head><body>
   <h1>Registrations: ${rows.length} <a class="ver" href="/admin/changelog?key=${k}">v${version.VERSION}</a>
-    <small>${seats} of ${SEAT_CAP} seats &middot; ${paidCount} paid${
-      compCount ? ' &middot; ' + compCount + ' complimentary' : ''} &middot; ${money(revenue)} total${
+    <small>${seats} of ${SEAT_CAP} seats &middot; ${paidSeats} paid${
+      unpaidSeats ? ' &middot; ' + unpaidSeats + ' unpaid' : ''}${
+      compSeats ? ' &middot; ' + compSeats + ' complimentary' : ''}<br>
+      ${money(revenue)} expected${
       waitlist.length ? ' &middot; ' + waitlist.length + ' on the waitlist' : ''}</small></h1>
   <div class="cap"><div class="capfill" style="width:${Math.min(100, Math.round((seats / SEAT_CAP) * 100))}%"></div></div>
-  <div class="bar">
-    <a class="btn primary" href="/checkin?key=${k}">Check-in desk</a>
-    <a class="btn ghost" href="/admin/stats?key=${k}">Visitor stats</a>
-    <a class="btn ghost" href="/admin.csv?key=${k}">CSV</a>
-    <a class="btn ghost" href="/admin/resync?key=${k}">Resync</a>
-    <a class="btn ghost" href="/admin/badges?key=${k}">Badges</a>
-    <a class="btn ghost" href="/admin/feedback?key=${k}">Feedback</a>
-    <a class="btn ghost" href="/admin/questions?key=${k}">Questions</a>
-    <a class="btn ghost" href="/screen/ask" target="_blank">Questions QR</a>
-    <a class="btn ghost" href="/screen" target="_blank">Feedback QR</a>
-    <a class="btn ghost" href="/admin/archives?key=${k}">Archive</a>
-    <a class="btn danger" href="/admin/reset?key=${k}">Clear\u2026</a>
-  </div>
+  <nav class="bar">
+    <div class="grp">
+      <span class="lbl">On the day</span>
+      <a class="btn primary" href="/checkin?key=${k}">Check-in desk</a>
+      <a class="btn ghost" href="/admin/questions?key=${k}">Questions</a>
+      <a class="btn ghost" href="/admin/badges?key=${k}">Badges</a>
+    </div>
+    <div class="grp">
+      <span class="lbl">On the screen</span>
+      <a class="btn ghost" href="/screen/register" target="_blank">Register QR</a>
+      <a class="btn ghost" href="/screen/ask" target="_blank">Questions QR</a>
+      <a class="btn ghost" href="/screen" target="_blank">Feedback QR</a>
+    </div>
+    <div class="grp">
+      <span class="lbl">Afterwards</span>
+      <a class="btn ghost" href="/admin/feedback?key=${k}">Feedback</a>
+      <a class="btn ghost" href="/admin/stats?key=${k}">Visitor stats</a>
+      <a class="btn ghost" href="/admin.csv?key=${k}">CSV</a>
+      <a class="btn ghost" href="/admin/resync?key=${k}">Resync</a>
+    </div>
+    <div class="grp">
+      <span class="lbl">Data</span>
+      <a class="btn ghost" href="/admin/archives?key=${k}">Archive</a>
+      <a class="btn danger" href="/admin/reset?key=${k}">Clear\u2026</a>
+    </div>
+  </nav>
   ${rows.length ? `<div class="grid">${cards}</div>` : '<div class="empty">No registrations yet.</div>'}
   ${waitlist.length ? `<h2 class="wlh">Waitlist (${waitlist.length})</h2>${wlRows}` : ''}
 
