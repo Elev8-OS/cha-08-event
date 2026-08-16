@@ -10,7 +10,8 @@ const fs = require('fs');
 const path = require('path');
 
 function mount(app, deps) {
-  const { DATA_DIR, guard, readAll, paidSet, compSet, addGhlTag, ATTENDED_TAG, ghlReady, addWalkin } = deps;
+  const { DATA_DIR, guard, readAll, paidSet, compSet, addGhlTag, removeGhlTag,
+    ATTENDED_TAG, ghlReady, addWalkin } = deps;
   const FILE = () => path.join(DATA_DIR, 'checkins.jsonl');
 
   // Latest entry per email wins, so an accidental check-in can be undone
@@ -40,6 +41,9 @@ function mount(app, deps) {
         comp: comps.has(r.email),
         walkin: Boolean(r.walkin),
         arrived: Boolean(a && a.arrived),
+        // A booking of three can turn up as two. The count is what the room
+        // actually holds; the flag is only "did anyone from this party come".
+        came: a && a.arrived ? (a.count || r.guests || 1) : 0,
         at: a && a.arrived ? a.ts.slice(11, 16) : '',
       };
     }).sort((a, b) => a.name.localeCompare(b.name));
@@ -48,27 +52,40 @@ function mount(app, deps) {
     res.json({
       guests,
       seatsTotal: guests.reduce((s, g) => s + g.seats, 0),
-      seatsArrived: guests.filter((g) => g.arrived).reduce((s, g) => s + g.seats, 0),
+      seatsArrived: guests.reduce((s, g) => s + g.came, 0),
     });
   });
 
   app.post('/checkin/mark', async (req, res) => {
     if (!guard(req, res)) return;
-    const email = String((req.body || {}).email || '').trim().toLowerCase();
-    const arrived = (req.body || {}).arrived !== false;
+    const b = req.body || {};
+    const email = String(b.email || '').trim().toLowerCase();
     if (!email) return res.status(400).json({ ok: false });
 
     const entry = readAll().find((r) => r.email === email);
     if (!entry) return res.status(404).json({ ok: false, error: 'not registered' });
 
-    fs.appendFileSync(FILE(), JSON.stringify({ ts: new Date().toISOString(), email, arrived }) + '\n');
-    console.log('[checkin]', arrived ? 'arrived' : 'undone', email);
+    // How many of the party walked in. Absent a number, assume the whole
+    // booking; zero means the check-in is being undone.
+    const seats = Math.max(1, parseInt(entry.guests, 10) || 1);
+    let count = b.count === undefined ? seats : parseInt(b.count, 10);
+    if (!(count >= 0)) count = seats;
+    count = Math.min(count, seats);
+    const arrived = count > 0;
+
+    fs.appendFileSync(FILE(),
+      JSON.stringify({ ts: new Date().toISOString(), email, arrived, count }) + '\n');
+    console.log('[checkin]', arrived ? `arrived ${count}/${seats}` : 'undone', email);
 
     // Tagging must never block the desk: answer first, sync after
-    res.json({ ok: true });
-    if (arrived && ghlReady()) {
-      try { await addGhlTag(entry, ATTENDED_TAG); } catch (e) { console.error('[checkin] tag failed', e.message); }
-    }
+    res.json({ ok: true, count });
+    if (!ghlReady()) return;
+    try {
+      // Undo has to reach the CRM as well, otherwise the Attended tag keeps
+      // claiming someone was here who never was.
+      if (arrived) await addGhlTag(entry, ATTENDED_TAG);
+      else await removeGhlTag(entry, ATTENDED_TAG);
+    } catch (e) { console.error('[checkin] tag sync failed', e.message); }
   });
 
   // Someone turns up who never registered: a colleague brought along, a CHA
@@ -108,7 +125,8 @@ function mount(app, deps) {
     }
 
     addWalkin(entry);
-    fs.appendFileSync(FILE(), JSON.stringify({ ts: entry.ts, email: entry.email, arrived: true }) + '\n');
+    fs.appendFileSync(FILE(),
+      JSON.stringify({ ts: entry.ts, email: entry.email, arrived: true, count: entry.guests }) + '\n');
     console.log('[checkin] walk-in', entry.name, entry.company);
 
     res.json({ ok: true, name: entry.name });
@@ -166,6 +184,12 @@ header img{height:34px} header img.c{height:50px}
 .g .unpaid{background:#FDF0E6;color:#8a5a1f}
 .g .walkin{background:#E8F0FB;color:#2c5282;margin-left:5px}
 .g .guest{background:#EDF2FB;color:#2c5282}
+.g .part{background:#FFF4D6;color:#7a5b00;margin-left:5px}
+.step{display:flex;align-items:center;gap:2px;flex-shrink:0}
+.step .sbtn{width:38px;height:38px;border:1px solid #ddd;background:#fff;border-radius:9px;
+  font:inherit;font-size:19px;font-weight:700;color:#444;cursor:pointer;line-height:1}
+.step .sbtn:active{background:#f2eee5}
+.step .cnt{min-width:44px;text-align:center;font-weight:700;font-size:14px;color:var(--grey)}
 .mark{width:52px;height:52px;border-radius:50%;border:2px solid #ddd;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;font-size:24px;color:#bbb;background:#fff}
 .g.in .mark{background:var(--green);border-color:var(--green);color:#fff}
@@ -204,6 +228,10 @@ header img{height:34px} header img.c{height:50px}
   .title span{font-size:12px}
   .count{order:5;margin-left:auto;margin-top:2px;flex-shrink:0}
   .count .n{font-size:22px}.count .l{font-size:10.5px}
+  .g{gap:8px;padding:14px}
+  .step .sbtn{width:34px;height:34px;font-size:17px}
+  .step .cnt{min-width:38px;font-size:13px}
+  .mark{width:46px;height:46px;font-size:21px}
   .fab{right:16px;bottom:16px;padding:15px 22px}}
 /* A browser toolbar would sit right on top of the walk-in button */
 body.browser .fab{bottom:calc(84px + env(safe-area-inset-bottom))}
@@ -267,7 +295,16 @@ function render() {
       + '<div class="meta">' + esc(g.company || g.email) + '</div>'
       + '<span class="seats' + (g.comp ? ' guest' : (g.paid ? '' : ' unpaid')) + '">' + g.seats + ' seat' + (g.seats > 1 ? 's' : '')
       + (g.comp ? ' \\u00b7 guest' : (g.paid ? '' : ' \\u00b7 unpaid')) + (g.arrived ? ' \\u00b7 ' + g.at : '') + '</span>'
-      + (g.walkin ? '<span class="seats walkin">walk-in</span>' : '') + '</div>'
+      + (g.walkin ? '<span class="seats walkin">walk-in</span>' : '')
+      + (g.seats > 1 && g.arrived && g.came < g.seats
+          ? '<span class="seats part">' + g.came + ' of ' + g.seats + ' came</span>' : '')
+      + '</div>'
+      // A party gets minus/plus so the desk can record who actually turned up
+      + (g.seats > 1
+          ? '<div class="step"><button class="sbtn" data-act="minus">\\u2212</button>'
+            + '<span class="cnt">' + g.came + '/' + g.seats + '</span>'
+            + '<button class="sbtn" data-act="plus">+</button></div>'
+          : '')
       + '<div class="mark">' + (g.arrived ? '\\u2713' : '') + '</div></div>';
   }).join('');
   document.getElementById('empty').style.display = shown.length ? 'none' : 'block';
@@ -295,16 +332,17 @@ function toast(msg, undoFn) {
   toastTimer = setTimeout(function () { t.classList.remove('show'); }, 4000);
 }
 
-async function mark(email, arrived) {
+async function mark(email, count) {
   var g = guests.filter(function (x) { return x.email === email; })[0];
   if (!g) return;
-  g.arrived = arrived;                       // optimistic: the desk must feel instant
-  if (arrived) g.at = new Date().toTimeString().slice(0, 5);
+  g.came = count;                            // optimistic: the desk must feel instant
+  g.arrived = count > 0;
+  if (g.arrived) g.at = new Date().toTimeString().slice(0, 5);
   render();
   try {
     await fetch('/checkin/mark?key=' + KEY, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email, arrived: arrived }),
+      body: JSON.stringify({ email: email, arrived: count > 0, count: count }),
     });
   } catch (e) { toast('Offline \\u2014 will not sync until connection returns', null); }
   load();
@@ -316,12 +354,26 @@ document.getElementById('list').addEventListener('click', function (e) {
   var email = card.getAttribute('data-email');
   var g = guests.filter(function (x) { return x.email === email; })[0];
   if (!g) return;
+
+  var step = e.target.closest('.sbtn');
+  if (step) {
+    // Adjusting the count must not also toggle the whole card
+    e.stopPropagation();
+    var n = step.getAttribute('data-act') === 'plus' ? g.came + 1 : g.came - 1;
+    n = Math.max(0, Math.min(n, g.seats));
+    if (n === g.came) return;
+    mark(email, n);
+    toast(g.name + ' \\u2014 ' + (n ? n + ' of ' + g.seats + ' here' : 'nobody checked in'), null);
+    return;
+  }
+
   if (g.arrived) {
-    mark(email, false);
+    mark(email, 0);
     toast(g.name + ' \\u2014 check-in removed', null);
   } else {
-    mark(email, true);
-    toast(g.name + ' \\u2014 welcome!', function () { mark(email, false); });
+    mark(email, g.seats);
+    toast(g.name + (g.seats > 1 ? ' \\u2014 all ' + g.seats + ' welcome!' : ' \\u2014 welcome!'),
+          function () { mark(email, 0); });
   }
 });
 
