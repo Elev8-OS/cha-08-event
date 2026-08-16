@@ -280,7 +280,7 @@ function adminPage(k, questions) {
       <div class="t"><p>${esc(q.text)}</p>
         <span class="meta">${esc(q.session || 'General')}${q.name ? ' &middot; ' + esc(q.name) : ' &middot; anonymous'}
           &middot; ${esc(q.ts.slice(11, 16))}</span></div>
-      <button class="mark">${q.done ? 'Undo' : 'Asked'}</button>
+      <button class="mark">${q.done ? 'Undo' : 'Answered'}</button>
     </div>`;
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Questions (${open.length})</title>
@@ -312,8 +312,8 @@ function adminPage(k, questions) {
   <p><a href="/admin?key=${k}">&larr; Back to registrations</a> &middot;
      <a href="/screen/ask" target="_blank">Put the QR on screen</a></p>
   <h1>Questions from the room</h1>
-  <p class="lead">Sorted by how many people backed each one. Tap <b>Asked</b> once
-    it has been answered, and it drops out of the audience's list too.</p>
+  <p class="lead">Sorted by how many people backed each one. Tap <b>Answered</b> when you
+    have dealt with it, and it drops out of the audience's list too.</p>
   ${open.length ? open.map(card).join('') : '<div class="empty">No questions yet.</div>'}
   ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join('')}` : ''}
 
