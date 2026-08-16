@@ -71,7 +71,9 @@ body{font-family:Inter,system-ui,sans-serif;background:#F7F4EE;color:#111}
   justify-content:center;align-content:start;box-shadow:0 4px 20px rgba(0,0,0,.08)}
 .badge{border:1px dashed #ccc;padding:9mm 6mm;display:flex;flex-direction:column;
   align-items:center;text-align:center;overflow:hidden;page-break-inside:avoid}
-.badge .logo{height:9mm}
+.badge .logos{display:flex;align-items:center;justify-content:center;gap:4mm;width:100%}
+.badge .logos img{max-height:6mm;max-width:30%;width:auto;object-fit:contain}
+.badge .logos img.c{max-height:9mm}
 .badge .nm{font-family:'Archivo Black',sans-serif;line-height:1.12;word-break:break-word;
   margin-top:auto}
 .badge .co{font-size:13px;color:#555;margin-top:3mm;line-height:1.3;
@@ -105,7 +107,11 @@ ${badges.length
     ? Array.from({ length: sheets }, (_, i) => `<div class="sheet">${
       badges.slice(i * PER_SHEET, (i + 1) * PER_SHEET).map((b) => `
       <div class="badge">
-        <img class="logo" src="/img/elev8.jpg" alt="">
+        <div class="logos">
+          <img src="/img/elev8.jpg" alt="">
+          <img class="c" src="/img/cha.jpg?v=2" alt="">
+          <img src="/img/mekari.jpg?v=2" alt="">
+        </div>
         <div class="nm" style="font-size:${nameSize(b.name)}">${esc(b.name)}</div>
         <div class="co">${esc(b.company)}</div>
         <div class="rule"></div>
