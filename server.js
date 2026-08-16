@@ -218,9 +218,31 @@ async function sendToGHL(entry) {
         customFields: ghlCustomFields(entry),
       }),
     });
-    if (!up.ok) throw new Error('api upsert HTTP ' + up.status + ' ' + (await up.text()).slice(0, 200));
 
-    const body = await up.json().catch(() => ({}));
+    // If GHL rejects a picklist value (e.g. a PMS option not yet added there),
+    // retry without custom fields rather than losing the registration entirely.
+    let response = up;
+    if (!up.ok) {
+      const detail = (await up.text()).slice(0, 200);
+      console.error('[ghl] upsert with custom fields failed, retrying plain:', detail);
+      response = await fetch(GHL_API_BASE + '/contacts/upsert', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          locationId: GHL_LOCATION_ID,
+          firstName, lastName,
+          name: entry.name,
+          email: entry.email,
+          phone: entry.phone,
+          companyName: entry.company || undefined,
+          source: GHL_SOURCE,
+          assignedTo: GHL_ASSIGNED_USER || undefined,
+        }),
+      });
+      if (!response.ok) throw new Error('api upsert HTTP ' + response.status + ' ' + detail);
+    }
+
+    const body = await response.json().catch(() => ({}));
     const contactId = body?.contact?.id || body?.id || body?.contact?.contactId;
     if (!contactId) throw new Error('api upsert returned no contact id');
 
@@ -449,8 +471,9 @@ app.get('/admin', (req, res) => {
       : `<a class="lnk mark" href="/admin/verify?key=${k}&email=${encodeURIComponent(r.email)}">Mark paid</a>`;
     const details = [r.role, r.properties ? r.properties + ' properties' : '', r.employees ? r.employees + ' staff' : '',
       r.pms, r.pain].filter(Boolean).map((x) => `<span class="chip">${esc(x)}</span>`).join('');
-    return `<article class="card${isPaid ? ' ok' : ''}">
-      <header><h3>${esc(r.name)}</h3><span class="amt">${money(due)}</span></header>
+    return `<article class="card${isPaid ? ' ok' : ''}" data-email="${esc(r.email)}">
+      <header><label class="pick"><input type="checkbox" class="sel" value="${esc(r.email)}"></label>
+        <h3>${esc(r.name)}</h3><span class="amt">${money(due)}</span></header>
       <p class="co">${esc(r.company || '\u2014')}</p>
       <p class="ct"><a href="mailto:${esc(r.email)}">${esc(r.email)}</a><br>
         <a href="tel:${esc(r.phone)}">${esc(r.phone)}</a></p>
@@ -475,7 +498,7 @@ app.get('/admin', (req, res) => {
   :root{--cream:#F7F4EE;--gold:#F6BB12;--grey:#666}
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:Inter,system-ui,sans-serif;background:var(--cream);color:#111;padding:18px;
-    padding-bottom:calc(18px + env(safe-area-inset-bottom))}
+    padding-bottom:calc(110px + env(safe-area-inset-bottom))}
   h1{font-size:19px;line-height:1.35}
   h1 small{display:block;font-size:13.5px;color:var(--grey);font-weight:500;margin-top:3px}
   .bar{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}
@@ -487,7 +510,21 @@ app.get('/admin', (req, res) => {
   .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
   .card{background:#fff;border:1px solid #e5e0d5;border-radius:14px;padding:16px 18px}
   .card.ok{background:#F7FCF8;border-color:#cfe8d4}
-  .card header{display:flex;align-items:baseline;gap:10px}
+  .card header{display:flex;align-items:center;gap:10px}
+  .pick{display:flex;align-items:center;cursor:pointer;padding:2px}
+  .pick input{width:20px;height:20px;accent-color:#111;cursor:pointer}
+  .card.picked{outline:2px solid #111;outline-offset:-2px}
+  .selbar{position:fixed;left:0;right:0;bottom:0;background:#111;color:#fff;
+    padding:14px 18px calc(14px + env(safe-area-inset-bottom));display:none;gap:12px;
+    align-items:center;flex-wrap:wrap;z-index:30;box-shadow:0 -4px 20px rgba(0,0,0,.2)}
+  .selbar.on{display:flex}
+  .selbar .n{font-weight:700;font-size:15px}
+  .selbar input[type=password]{flex:1 1 160px;min-width:130px;padding:11px 12px;border:0;
+    border-radius:8px;font-size:16px;font-family:inherit}
+  .selbar button{border:0;border-radius:8px;padding:12px 18px;font:inherit;font-weight:700;cursor:pointer}
+  .selbar .go{background:#F6BB12;color:#111}
+  .selbar .cancel{background:transparent;color:#bbb;padding:12px 6px}
+  .selbar .msg{flex-basis:100%;font-size:13px;color:#F6BB12}
   .card h3{font-size:17px;flex:1;min-width:0;overflow-wrap:anywhere}
   .amt{font-weight:700;font-size:15px;white-space:nowrap}
   .co{color:var(--grey);font-size:14px;margin-top:2px;overflow-wrap:anywhere}
@@ -506,7 +543,7 @@ app.get('/admin', (req, res) => {
   .tag.paid{color:#137333;font-weight:700;font-size:13px;letter-spacing:.5px}
   .empty{background:#fff;border:1px dashed #d8d2c4;border-radius:14px;padding:40px 20px;
     text-align:center;color:var(--grey)}
-  @media(max-width:600px){body{padding:14px}.btn{flex:1 1 46%}}
+  @media(max-width:600px){body{padding:14px;padding-bottom:calc(120px + env(safe-area-inset-bottom))}.btn{flex:1 1 46%}}
   </style></head><body>
   <h1>Registrations: ${rows.length}
     <small>${seats} seats &middot; ${paidCount} paid &middot; ${money(seats * SEAT_PRICE)} total</small></h1>
@@ -518,6 +555,53 @@ app.get('/admin', (req, res) => {
     <a class="btn danger" href="/admin/reset?key=${k}">Clear\u2026</a>
   </div>
   ${rows.length ? `<div class="grid">${cards}</div>` : '<div class="empty">No registrations yet.</div>'}
+
+  <div class="selbar" id="selbar">
+    <span class="n" id="selcount">0 selected</span>
+    <input type="password" id="selpw" placeholder="Reset password" autocomplete="off">
+    <button class="go" id="selgo">Archive</button>
+    <button class="cancel" id="selcancel">Cancel</button>
+    <span class="msg" id="selmsg"></span>
+  </div>
+
+  <script>
+  var bar = document.getElementById('selbar');
+  function picked() {
+    return [].slice.call(document.querySelectorAll('.sel:checked')).map(function (c) { return c.value; });
+  }
+  function sync() {
+    var n = picked().length;
+    document.getElementById('selcount').textContent = n + ' selected';
+    bar.classList.toggle('on', n > 0);
+    document.getElementById('selmsg').textContent = '';
+    [].forEach.call(document.querySelectorAll('.card'), function (c) {
+      c.classList.toggle('picked', c.querySelector('.sel').checked);
+    });
+  }
+  document.addEventListener('change', function (e) { if (e.target.classList.contains('sel')) sync(); });
+  document.getElementById('selcancel').addEventListener('click', function () {
+    [].forEach.call(document.querySelectorAll('.sel'), function (c) { c.checked = false; });
+    sync();
+  });
+  document.getElementById('selgo').addEventListener('click', async function () {
+    var emails = picked(), pw = document.getElementById('selpw').value;
+    var msg = document.getElementById('selmsg');
+    if (!emails.length) return;
+    if (!pw) { msg.textContent = 'Enter the reset password.'; return; }
+    if (!confirm('Archive ' + emails.length + ' registration(s)? They are moved to an archive folder, not deleted.')) return;
+    this.disabled = true; msg.textContent = 'Archiving\u2026';
+    try {
+      var r = await fetch('/admin/archive?key=${k}', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw, emails: emails }),
+      });
+      var d = await r.json();
+      if (d.ok) { location.reload(); return; }
+      msg.textContent = d.error || 'Failed.';
+    } catch (e) { msg.textContent = 'Network error \u2014 nothing was changed.'; }
+    this.disabled = false;
+  });
+  </script>
   </body></html>`);
 });
 
@@ -676,6 +760,67 @@ app.get('/admin/stats', (req, res) => {
   <p><a href="/admin?key=${k}">\u2190 Back to registrations</a></p></body></html>`);
 });
 
+// Archive individual registrations. Same principle as the full reset: entries
+// are moved to a timestamped folder, never deleted, and the password is
+// required so a stray tap on a phone cannot wipe a paying attendee.
+app.post('/admin/archive', (req, res) => {
+  if (!guard(req, res)) return;
+  const { password, emails } = req.body || {};
+  if (!RESET_PASSWORD) return res.status(500).json({ ok: false, error: 'No reset password configured.' });
+  if (String(password || '') !== RESET_PASSWORD) {
+    console.error('[admin] selective archive attempt with wrong password');
+    return res.status(403).json({ ok: false, error: 'Wrong password.' });
+  }
+  const wanted = new Set((Array.isArray(emails) ? emails : []).map((e) => String(e).trim().toLowerCase()));
+  if (!wanted.size) return res.status(400).json({ ok: false, error: 'Nothing selected.' });
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const archive = path.join(DATA_DIR, 'archive-selected-' + stamp);
+  fs.mkdirSync(archive, { recursive: true });
+
+  // Split a jsonl file into kept and removed lines, writing atomically so a
+  // request arriving mid-rewrite cannot read a half-written file.
+  const split = (fileName) => {
+    const src = path.join(DATA_DIR, fileName);
+    if (!fs.existsSync(src)) return 0;
+    const kept = []; const gone = [];
+    fs.readFileSync(src, 'utf8').trim().split('\n').filter(Boolean).forEach((l) => {
+      let email = '';
+      try { email = String(JSON.parse(l).email || '').toLowerCase(); } catch {}
+      (wanted.has(email) ? gone : kept).push(l);
+    });
+    if (gone.length) {
+      fs.writeFileSync(path.join(archive, fileName), gone.join('\n') + '\n');
+      const tmp = src + '.tmp';
+      fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '');
+      fs.renameSync(tmp, src);
+    }
+    return gone.length;
+  };
+
+  // Grab the proof filenames before the registrations disappear
+  const proofs = readAll().filter((r) => wanted.has(r.email)).map((r) => r.proofFile).filter(Boolean);
+
+  const removed = split('registrations.jsonl');
+  split('payments.jsonl');
+  split('pending.jsonl');
+  split('ghl-sync.jsonl');
+  split('checkins.jsonl');
+
+  let movedProofs = 0;
+  if (proofs.length) {
+    const dest = path.join(archive, 'proofs');
+    fs.mkdirSync(dest, { recursive: true });
+    proofs.forEach((f) => {
+      const src = path.join(PROOF_DIR, f);
+      if (fs.existsSync(src)) { fs.renameSync(src, path.join(dest, f)); movedProofs++; }
+    });
+  }
+
+  console.log('[admin] archived', removed, 'registration(s) to', archive, '| proofs:', movedProofs);
+  res.json({ ok: true, archived: removed, folder: path.basename(archive) });
+});
+
 // Clear all registration data. Nothing is deleted: files and proof images are
 // moved into a timestamped archive folder inside DATA_DIR, so a mistake is
 // always recoverable. Needs the admin key AND the reset password, and the
@@ -687,7 +832,8 @@ function resetPage(k, error) {
     + '<body style="font-family:system-ui;padding:24px;background:#F7F4EE;max-width:560px">'
     + '<h2 style="margin-bottom:6px">Clear all registration data?</h2>'
     + '<p style="color:#444;line-height:1.5">This moves every registration, payment record and payment '
-    + 'screenshot into an archive folder. The list will be empty afterwards. Nothing is permanently deleted.</p>'
+    + 'screenshot into an archive folder. The list will be empty afterwards. Nothing is permanently deleted. '
+    + 'To remove only some entries, tick them on the registrations page instead.</p>'
     + (error ? `<p style="color:#a33;font-weight:600">${error}</p>` : '')
     + `<form method="POST" action="/admin/reset?key=${k}" style="margin-top:18px">`
     + '<label style="display:block;font-weight:600;font-size:14px;margin-bottom:6px">Reset password</label>'
