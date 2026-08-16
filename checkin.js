@@ -82,11 +82,16 @@ function page(k) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Check-in &middot; Smarter Revenue, Better Tech</title>
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="CHA-08 Check-in">
+<link rel="apple-touch-icon" href="/img/appicon.png">
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--cream:#F7F4EE;--ink:#111;--gold:#F6BB12;--grey:#666;--green:#137333}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:Inter,system-ui,sans-serif;background:var(--cream);color:var(--ink);
+body{font-family:Inter,system-ui,sans-serif;background:var(--cream);color:var(--ink);padding-bottom:env(safe-area-inset-bottom);
   -webkit-user-select:none;user-select:none}
 header{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid #e5e0d5;
   padding:14px 22px;display:flex;align-items:center;gap:22px;flex-wrap:wrap}
@@ -123,7 +128,8 @@ header img{height:34px} header img.c{height:50px}
 .toast.show{transform:translateX(-50%) translateY(0)}
 .toast button{background:none;border:0;color:var(--gold);font:inherit;font-weight:700;cursor:pointer}
 @media(max-width:640px){.list{grid-template-columns:1fr;padding:8px 14px 40px}
-  .search{padding:12px 14px 6px}header{padding:12px 14px;gap:14px}header img{height:26px}header img.c{height:38px}}
+  .search{padding:12px 14px 6px}header{padding:12px 14px;gap:12px}header img{height:24px}header img.c{height:34px}
+  .title{font-size:15px;width:100%;order:5}.back{order:3}.count{order:4;margin-left:0}}
 </style></head><body>
 
 <header>
