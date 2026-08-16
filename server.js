@@ -5,6 +5,9 @@ const crypto = require('crypto');
 const payment = require('./payment');
 const checkin = require('./checkin');
 const archive = require('./archive');
+const slides = require('./slides');
+const badges = require('./badges');
+const feedback = require('./feedback');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -121,6 +124,8 @@ const GHL_SOURCE = process.env.GHL_SOURCE || 'CHA-08 landing page';
 const GHL_API_BASE = process.env.GHL_API_BASE || 'https://services.leadconnectorhq.com';
 const GHL_TAG_PAID = process.env.GHL_TAG_PAID || (GHL_TAG + ' - Paid');
 const GHL_TAG_ATTENDED = process.env.GHL_TAG_ATTENDED || (GHL_TAG + ' - Attended');
+const GHL_TAG_WAITLIST = process.env.GHL_TAG_WAITLIST || (GHL_TAG + ' - Waitlist');
+const GHL_TAG_WALKIN = process.env.GHL_TAG_WALKIN || (GHL_TAG + ' - Walk-in');
 // Custom field ids in GHL. Values must match the picklists configured there.
 const GHL_CF_PROPERTIES = process.env.GHL_CF_PROPERTIES || 'igDIndbcECJUpM96Kk7V'; // Number of Properties
 const GHL_CF_PMS = process.env.GHL_CF_PMS || '3Z3qAyZ0luOBmHeQh2AD';               // Current PMS / Software
@@ -294,6 +299,17 @@ function logSync(email, status, detail) {
 // When the gateway is configured, each registration gets its own QRIS with the
 // exact amount, and Midtrans confirms payment by webhook - no screenshots.
 const SEAT_PRICE = parseInt(process.env.SEAT_PRICE || '50000', 10);
+// Hard capacity of the venue. Once it is reached, further sign-ups go to a
+// waitlist instead of being turned away - the interest is worth capturing.
+const SEAT_CAP = parseInt(process.env.SEAT_CAP || '70', 10);
+const WAITLIST_FILE = () => path.join(DATA_DIR, 'waitlist.jsonl');
+
+function seatsBooked() {
+  return readAll().reduce((a, r) => a + (parseInt(r.guests, 10) || 1), 0);
+}
+function seatsLeft() {
+  return Math.max(0, SEAT_CAP - seatsBooked());
+}
 
 function orderIdFor(email) {
   return 'CHA08-' + Date.now() + '-' + Buffer.from(email).toString('hex').slice(0, 8);
@@ -334,6 +350,13 @@ function confirmPaid(entry) {
     .catch((e) => { console.error('[ghl] FAILED', entry.email, e.message); logSync(entry.email, 'failed', e.message); });
 }
 
+// The landing page asks for this on load, so visitors see honest availability
+app.get('/api/seats', (_req, res) => {
+  const left = seatsLeft();
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ cap: SEAT_CAP, left, full: left <= 0 });
+});
+
 // --- RSVP endpoint ---
 app.post('/api/rsvp', (req, res) => {
   const { name, email, phone, company, role, guests, properties, employees, pms, pain, website } = req.body || {};
@@ -348,9 +371,43 @@ app.post('/api/rsvp', (req, res) => {
     return res.status(400).json({ ok: false, error: 'Please provide your WhatsApp number.' });
   }
 
+  const wantSeats = Math.min(Math.max(parseInt(guests, 10) || 1, 1), 10);
+
+  // No room left: record the interest rather than losing it. Nothing is charged.
+  if (wantSeats > seatsLeft()) {
+    const wl = {
+      ts: new Date().toISOString(),
+      name: String(name).trim().slice(0, 120),
+      email: String(email).trim().toLowerCase().slice(0, 160),
+      phone: String(phone || '').trim().slice(0, 40),
+      company: String(company || '').trim().slice(0, 160),
+      role: String(role || '').trim().slice(0, 60),
+      guests: wantSeats,
+      properties: String(properties || '').slice(0, 20),
+      employees: String(employees || '').slice(0, 20),
+      pms: String(pms || '').slice(0, 40),
+      pain: String(pain || '').slice(0, 60),
+    };
+    const dupe = fs.existsSync(WAITLIST_FILE())
+      && fs.readFileSync(WAITLIST_FILE(), 'utf8').includes('"' + wl.email + '"');
+    if (!dupe) {
+      fs.appendFileSync(WAITLIST_FILE(), JSON.stringify(wl) + '\n');
+      sendToGHL(wl)
+        .then(async (mode) => {
+          if (mode === 'disabled') return;
+          if (GHL_API_TOKEN && GHL_LOCATION_ID) {
+            try { await addGhlTag(wl, GHL_TAG_WAITLIST); } catch (e) { console.error('[ghl] waitlist tag failed', e.message); }
+          }
+        })
+        .catch((e) => console.error('[ghl] waitlist sync failed', e.message));
+    }
+    console.log('[waitlist]', wl.email, wl.guests, 'seat(s) |', seatsLeft(), 'left of', SEAT_CAP);
+    return res.json({ ok: true, mode: 'waitlist' });
+  }
+
   // Gateway path: create a dynamic QRIS and hold the registration until Midtrans confirms
   if (payment.isEnabled()) {
-    const seats = Math.min(Math.max(parseInt(guests, 10) || 1, 1), 10);
+    const seats = wantSeats;
     const pending = {
       ts: new Date().toISOString(),
       name: String(name).trim().slice(0, 120),
@@ -403,7 +460,7 @@ app.post('/api/rsvp', (req, res) => {
     phone: String(phone || '').trim().slice(0, 40),
     company: String(company || '').trim().slice(0, 160),
     role: String(role || '').trim().slice(0, 60),
-    guests: Math.min(Math.max(parseInt(guests, 10) || 1, 1), 10),
+    guests: wantSeats,
     properties: String(properties || '').slice(0, 20),
     employees: String(employees || '').slice(0, 20),
     pms: String(pms || '').slice(0, 40),
@@ -475,7 +532,7 @@ app.get('/admin', (req, res) => {
     return `<article class="card${isPaid ? ' ok' : ''}" data-email="${esc(r.email)}">
       <header><label class="pick"><input type="checkbox" class="sel" value="${esc(r.email)}"></label>
         <h3>${esc(r.name)}</h3><span class="amt">${money(due)}</span></header>
-      <p class="co">${esc(r.company || '\u2014')}</p>
+      <p class="co">${esc(r.company || '\u2014')}${r.walkin ? ' <span class="chip wi">walk-in</span>' : ''}</p>
       <p class="ct"><a href="mailto:${esc(r.email)}">${esc(r.email)}</a><br>
         <a href="tel:${esc(r.phone)}">${esc(r.phone)}</a></p>
       <div class="chips"><span class="chip seats">${esc(r.guests)} seat${r.guests > 1 ? 's' : ''}</span>${details}</div>
@@ -486,6 +543,17 @@ app.get('/admin', (req, res) => {
 
   const seats = rows.reduce((a, r) => a + (r.guests || 1), 0);
   const paidCount = rows.filter((r) => paid.get(r.email) === true).length;
+  const waitlist = fs.existsSync(WAITLIST_FILE())
+    ? fs.readFileSync(WAITLIST_FILE(), 'utf8').trim().split('\n').filter(Boolean)
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
+    : [];
+  const wlRows = waitlist.map((w) => `<div class="wl">
+      <div><b>${esc(w.name)}</b> <span>${esc(w.company || '')}</span><br>
+        <a href="mailto:${esc(w.email)}">${esc(w.email)}</a> &middot;
+        <a href="tel:${esc(w.phone)}">${esc(w.phone)}</a></div>
+      <span class="chip">${esc(w.guests)} seat${w.guests > 1 ? 's' : ''}</span>
+    </div>`).join('');
+
   res.send(`<!doctype html><html lang="en"><head>
   <meta charset="utf-8"><title>Registrations (${rows.length})</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -534,6 +602,7 @@ app.get('/admin', (req, res) => {
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
   .chip{background:#F2EEE5;border-radius:20px;padding:4px 10px;font-size:12px;font-weight:600}
   .chip.seats{background:#111;color:#fff}
+  .chip.wi{background:#E8F0FB;color:#2c5282}
   .card footer{display:flex;align-items:center;gap:12px;margin-top:12px;padding-top:10px;
     border-top:1px solid #eee7db;flex-wrap:wrap}
   .ts{font-size:12px;color:#999}
@@ -544,19 +613,32 @@ app.get('/admin', (req, res) => {
   .tag.paid{color:#137333;font-weight:700;font-size:13px;letter-spacing:.5px}
   .empty{background:#fff;border:1px dashed #d8d2c4;border-radius:14px;padding:40px 20px;
     text-align:center;color:var(--grey)}
+  .cap{background:#e5e0d5;border-radius:4px;height:7px;margin-top:10px;overflow:hidden}
+  .capfill{background:var(--gold);height:100%}
+  .wlh{font-size:16px;margin:26px 0 10px}
+  .wl{background:#fff;border:1px solid #e5e0d5;border-radius:12px;padding:14px 16px;margin-bottom:8px;
+    display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:14px}
+  .wl div{flex:1;min-width:200px;overflow-wrap:anywhere}
+  .wl span{color:var(--grey)}
+  .wl a{color:#111}
   @media(max-width:600px){body{padding:14px;padding-bottom:calc(120px + env(safe-area-inset-bottom))}.btn{flex:1 1 46%}}
   </style></head><body>
   <h1>Registrations: ${rows.length}
-    <small>${seats} seats &middot; ${paidCount} paid &middot; ${money(seats * SEAT_PRICE)} total</small></h1>
+    <small>${seats} of ${SEAT_CAP} seats &middot; ${paidCount} paid &middot; ${money(seats * SEAT_PRICE)} total${
+      waitlist.length ? ' &middot; ' + waitlist.length + ' on the waitlist' : ''}</small></h1>
+  <div class="cap"><div class="capfill" style="width:${Math.min(100, Math.round((seats / SEAT_CAP) * 100))}%"></div></div>
   <div class="bar">
     <a class="btn primary" href="/checkin?key=${k}">Check-in desk</a>
     <a class="btn ghost" href="/admin/stats?key=${k}">Visitor stats</a>
     <a class="btn ghost" href="/admin.csv?key=${k}">CSV</a>
     <a class="btn ghost" href="/admin/resync?key=${k}">Resync</a>
+    <a class="btn ghost" href="/admin/badges?key=${k}">Badges</a>
+    <a class="btn ghost" href="/admin/feedback?key=${k}">Feedback</a>
     <a class="btn ghost" href="/admin/archives?key=${k}">Archive</a>
     <a class="btn danger" href="/admin/reset?key=${k}">Clear\u2026</a>
   </div>
   ${rows.length ? `<div class="grid">${cards}</div>` : '<div class="empty">No registrations yet.</div>'}
+  ${waitlist.length ? `<h2 class="wlh">Waitlist (${waitlist.length})</h2>${wlRows}` : ''}
 
   <div class="selbar" id="selbar">
     <span class="n" id="selcount">0 selected</span>
@@ -612,9 +694,10 @@ app.get('/admin.csv', (req, res) => {
   const rows = readAll();
   const csvEsc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
   const paid = paidSet();
-  const csv = ['ts,name,email,phone,company,role,properties,employees,pms,pain_point,seats,amount_idr,paid,proof_file,order_id']
-    .concat(rows.map((r) => [r.ts, r.name, r.email, r.phone, r.company, r.role, r.properties, r.employees, r.pms, r.pain, r.guests,
-      (r.guests || 1) * SEAT_PRICE, paid.get(r.email) === true ? 'yes' : 'no', r.proofFile || '', r.orderId || ''].map(csvEsc).join(',')))
+  const csv = ['ts,name,email,phone,company,role,properties,employees,pms,pain_point,seats,amount_idr,paid,walkin,proof_file,order_id']
+    .concat(readAll().map((r) => [r.ts, r.name, r.email, r.phone, r.company, r.role, r.properties, r.employees, r.pms, r.pain, r.guests,
+      (r.guests || 1) * SEAT_PRICE, paid.get(r.email) === true ? 'yes' : 'no', r.walkin ? 'yes' : 'no',
+      r.proofFile || '', r.orderId || ''].map(csvEsc).join(',')))
     .join('\n');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="registrations.csv"');
@@ -808,6 +891,7 @@ app.post('/admin/archive', (req, res) => {
   split('pending.jsonl');
   split('ghl-sync.jsonl');
   split('checkins.jsonl');
+  split('waitlist.jsonl');
 
   let movedProofs = 0;
   if (proofs.length) {
@@ -868,7 +952,8 @@ app.post('/admin/reset', (req, res) => {
   fs.mkdirSync(archiveDir, { recursive: true });
 
   const moved = [];
-  ['registrations.jsonl', 'payments.jsonl', 'pending.jsonl', 'ghl-sync.jsonl', 'views.jsonl', 'checkins.jsonl'].forEach((f) => {
+  ['registrations.jsonl', 'payments.jsonl', 'pending.jsonl', 'ghl-sync.jsonl',
+    'views.jsonl', 'checkins.jsonl', 'waitlist.jsonl', 'feedback.jsonl'].forEach((f) => {
     const src = path.join(DATA_DIR, f);
     if (fs.existsSync(src)) { fs.renameSync(src, path.join(archiveDir, f)); moved.push(f); }
   });
@@ -927,12 +1012,38 @@ archive.mount(app, {
   RESET_PASSWORD: () => RESET_PASSWORD,
 });
 
+// A walk-in is a real registration: stored, paid (they pay cash at the door)
+// and pushed to GHL with its own tag so the follow-up can tell them apart.
+function addWalkin(entry) {
+  fs.appendFileSync(DB_FILE, JSON.stringify(entry) + '\n');
+  fs.appendFileSync(path.join(DATA_DIR, 'payments.jsonl'),
+    JSON.stringify({ ts: entry.ts, email: entry.email, paid: true, walkin: true }) + '\n');
+
+  if (!entry.email.endsWith('@cha-08.local')) {
+    sendToGHL(entry)
+      .then(async (mode) => {
+        if (mode === 'disabled') return;
+        logSync(entry.email, 'sent', mode);
+        if (GHL_API_TOKEN && GHL_LOCATION_ID) {
+          for (const t of [GHL_TAG_WALKIN, GHL_TAG_ATTENDED, GHL_TAG_PAID]) {
+            try { await addGhlTag(entry, t); } catch (e) { console.error('[ghl] walk-in tag failed', e.message); }
+          }
+        }
+      })
+      .catch((e) => { console.error('[ghl] walk-in sync failed', e.message); logSync(entry.email, 'failed', e.message); });
+  }
+}
+
 // Reception check-in (tablet interface at the door)
 checkin.mount(app, {
-  DATA_DIR, guard, readAll, paidSet, addGhlTag,
+  DATA_DIR, guard, readAll, paidSet, addGhlTag, addWalkin,
   ATTENDED_TAG: GHL_TAG_ATTENDED,
   ghlReady: () => Boolean(GHL_API_TOKEN && GHL_LOCATION_ID),
 });
+
+slides.mount(app);
+badges.mount(app, { guard, readAll, paidSet });
+feedback.mount(app, { DATA_DIR, guard });
 
 app.get('/health', (_req, res) => res.json({
   ok: true,
@@ -941,12 +1052,15 @@ app.get('/health', (_req, res) => res.json({
   assignedTo: GHL_ASSIGNED_USER || 'not set',
   payment: payment.isEnabled() ? payment.mode() + ' (automatic QRIS)' : (PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via ' + PAYMENT_METHOD + ' (proof required)' : 'disabled'),
   seatPrice: SEAT_PRICE,
+  seatCap: SEAT_CAP,
+  seatsLeft: seatsLeft(),
 }));
 
 app.listen(PORT, () => {
   const mode = GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'NOT CONFIGURED (still placeholders)');
   console.log(`CHA-08 event page running on :${PORT}`);
   console.log(`[ghl] mode: ${mode} | tag: "${GHL_TAG}" | assigned to: ${GHL_ASSIGNED_USER || 'nobody'}`);
+  console.log(`[seats] cap ${SEAT_CAP} | ${seatsLeft()} left`);
   console.log(`[payment] ${payment.isEnabled()
     ? payment.mode() + ' - automatic QRIS, IDR ' + SEAT_PRICE + ' per seat'
     : (PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via ' + PAYMENT_METHOD + ', screenshot required' : 'disabled')}`);
