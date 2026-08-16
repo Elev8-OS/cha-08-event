@@ -127,6 +127,7 @@ const GHL_TAG_PAID = process.env.GHL_TAG_PAID || (GHL_TAG + ' - Paid');
 const GHL_TAG_ATTENDED = process.env.GHL_TAG_ATTENDED || (GHL_TAG + ' - Attended');
 const GHL_TAG_WAITLIST = process.env.GHL_TAG_WAITLIST || (GHL_TAG + ' - Waitlist');
 const GHL_TAG_WALKIN = process.env.GHL_TAG_WALKIN || (GHL_TAG + ' - Walk-in');
+const GHL_TAG_COMP = process.env.GHL_TAG_COMP || (GHL_TAG + ' - Complimentary');
 // Custom field ids in GHL. Values must match the picklists configured there.
 const GHL_CF_PROPERTIES = process.env.GHL_CF_PROPERTIES || 'igDIndbcECJUpM96Kk7V'; // Number of Properties
 const GHL_CF_PMS = process.env.GHL_CF_PMS || '3Z3qAyZ0luOBmHeQh2AD';               // Current PMS / Software
@@ -172,6 +173,20 @@ function paidSet() {
     });
   }
   return map;
+}
+
+// Invited guests - our own team, partners, speakers. They register like anyone
+// else so they appear in the head count and receive the whole email flow, but
+// they owe nothing: no amount due, and no misleading "unpaid" at the door.
+function compSet() {
+  const f = path.join(DATA_DIR, 'payments.jsonl');
+  const map = new Map();
+  if (fs.existsSync(f)) {
+    fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).forEach((l) => {
+      try { const r = JSON.parse(l); if ('comp' in r) map.set(r.email, r.comp); } catch {}
+    });
+  }
+  return new Set([...map.entries()].filter(([, v]) => v).map(([e]) => e));
 }
 
 // Only send fields that actually carry a value - GHL rejects empty picklist values
@@ -519,20 +534,28 @@ app.get('/admin', (req, res) => {
   const k = encodeURIComponent(req.query.key);
   const money = (n) => 'IDR ' + Number(n).toLocaleString('en-US');
 
+  const comps = compSet();
   const cards = rows.map((r) => {
+    const isComp = comps.has(r.email);
     const isPaid = paid.get(r.email) === true;
-    const due = (r.guests || 1) * SEAT_PRICE;
+    const due = isComp ? 0 : (r.guests || 1) * SEAT_PRICE;
     const proof = r.proofFile
       ? `<a class="lnk" href="/admin/proof?key=${k}&file=${encodeURIComponent(r.proofFile)}" target="_blank">View proof</a>`
       : '';
-    const action = isPaid
-      ? '<span class="tag paid">PAID</span>'
-      : `<a class="lnk mark" href="/admin/verify?key=${k}&email=${encodeURIComponent(r.email)}">Mark paid</a>`;
+    const action = isComp
+      ? `<span class="tag comp">GUEST</span>
+         <a class="lnk small" href="/admin/comp?key=${k}&off=1&email=${encodeURIComponent(r.email)}">undo</a>`
+      : (isPaid
+        ? `<span class="tag paid">PAID</span>
+           <a class="lnk small" href="/admin/comp?key=${k}&email=${encodeURIComponent(r.email)}">guest</a>`
+        : `<a class="lnk mark" href="/admin/verify?key=${k}&email=${encodeURIComponent(r.email)}">Mark paid</a>
+           <a class="lnk small" href="/admin/comp?key=${k}&email=${encodeURIComponent(r.email)}">guest</a>`);
     const details = [r.role, r.properties ? r.properties + ' properties' : '', r.employees ? r.employees + ' staff' : '',
       r.pms, r.pain].filter(Boolean).map((x) => `<span class="chip">${esc(x)}</span>`).join('');
-    return `<article class="card${isPaid ? ' ok' : ''}" data-email="${esc(r.email)}">
+    return `<article class="card${isComp ? ' guest' : (isPaid ? ' ok' : '')}" data-email="${esc(r.email)}">
       <header><label class="pick"><input type="checkbox" class="sel" value="${esc(r.email)}"></label>
-        <h3>${esc(r.name)}</h3><span class="amt">${money(due)}</span></header>
+        <h3>${esc(r.name)}</h3><span class="amt${isComp ? ' free' : ''}">${
+          isComp ? 'Complimentary' : money(due)}</span></header>
       <p class="co">${esc(r.company || '\u2014')}${r.walkin ? ' <span class="chip wi">walk-in</span>' : ''}</p>
       <p class="ct"><a href="mailto:${esc(r.email)}">${esc(r.email)}</a><br>
         <a href="tel:${esc(r.phone)}">${esc(r.phone)}</a></p>
@@ -543,7 +566,11 @@ app.get('/admin', (req, res) => {
   }).join('');
 
   const seats = rows.reduce((a, r) => a + (r.guests || 1), 0);
-  const paidCount = rows.filter((r) => paid.get(r.email) === true).length;
+  const compCount = rows.filter((r) => comps.has(r.email)).length;
+  const paidCount = rows.filter((r) => paid.get(r.email) === true && !comps.has(r.email)).length;
+  const revenue = rows.filter((r) => !comps.has(r.email))
+    .reduce((a, r) => a + (r.guests || 1) * SEAT_PRICE, 0);
+
   const waitlist = fs.existsSync(WAITLIST_FILE())
     ? fs.readFileSync(WAITLIST_FILE(), 'utf8').trim().split('\n').filter(Boolean)
       .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
@@ -580,6 +607,10 @@ app.get('/admin', (req, res) => {
   .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
   .card{background:#fff;border:1px solid #e5e0d5;border-radius:14px;padding:16px 18px}
   .card.ok{background:#F7FCF8;border-color:#cfe8d4}
+  .card.guest{background:#F7F9FD;border-color:#cfd9e8}
+  .amt.free{color:#2c5282;font-size:13.5px}
+  .tag.comp{color:#2c5282;font-weight:700;font-size:13px;letter-spacing:.5px}
+  .lnk.small{font-size:12.5px;padding:6px 9px;color:#666}
   .card header{display:flex;align-items:center;gap:10px}
   .pick{display:flex;align-items:center;cursor:pointer;padding:2px}
   .pick input{width:20px;height:20px;accent-color:#111;cursor:pointer}
@@ -625,7 +656,8 @@ app.get('/admin', (req, res) => {
   @media(max-width:600px){body{padding:14px;padding-bottom:calc(120px + env(safe-area-inset-bottom))}.btn{flex:1 1 46%}}
   </style></head><body>
   <h1>Registrations: ${rows.length}
-    <small>${seats} of ${SEAT_CAP} seats &middot; ${paidCount} paid &middot; ${money(seats * SEAT_PRICE)} total${
+    <small>${seats} of ${SEAT_CAP} seats &middot; ${paidCount} paid${
+      compCount ? ' &middot; ' + compCount + ' complimentary' : ''} &middot; ${money(revenue)} total${
       waitlist.length ? ' &middot; ' + waitlist.length + ' on the waitlist' : ''}</small></h1>
   <div class="cap"><div class="capfill" style="width:${Math.min(100, Math.round((seats / SEAT_CAP) * 100))}%"></div></div>
   <div class="bar">
@@ -695,9 +727,11 @@ app.get('/admin.csv', (req, res) => {
   if (!guard(req, res)) return;
   const csvEsc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
   const paid = paidSet();
-  const csv = ['ts,name,email,phone,company,role,properties,employees,pms,pain_point,seats,amount_idr,paid,walkin,proof_file,order_id']
+  const comps = compSet();
+  const csv = ['ts,name,email,phone,company,role,properties,employees,pms,pain_point,seats,amount_idr,paid,complimentary,walkin,proof_file,order_id']
     .concat(readAll().map((r) => [r.ts, r.name, r.email, r.phone, r.company, r.role, r.properties, r.employees, r.pms, r.pain, r.guests,
-      (r.guests || 1) * SEAT_PRICE, paid.get(r.email) === true ? 'yes' : 'no', r.walkin ? 'yes' : 'no',
+      comps.has(r.email) ? 0 : (r.guests || 1) * SEAT_PRICE,
+      paid.get(r.email) === true ? 'yes' : 'no', comps.has(r.email) ? 'yes' : 'no', r.walkin ? 'yes' : 'no',
       r.proofFile || '', r.orderId || ''].map(csvEsc).join(',')))
     .join('\n');
   res.setHeader('Content-Type', 'text/csv');
@@ -1007,6 +1041,24 @@ app.get('/admin/verify', async (req, res) => {
   res.redirect('/admin?key=' + encodeURIComponent(req.query.key));
 });
 
+// Mark a guest as complimentary, or take the status away again
+app.get('/admin/comp', async (req, res) => {
+  if (!guard(req, res)) return;
+  const email = String(req.query.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).send('email required');
+  const on = String(req.query.off || '') !== '1';
+
+  fs.appendFileSync(path.join(DATA_DIR, 'payments.jsonl'),
+    JSON.stringify({ ts: new Date().toISOString(), email, paid: on, comp: on }) + '\n');
+  console.log('[admin]', on ? 'complimentary' : 'complimentary removed', email);
+
+  const entry = readAll().find((r) => r.email === email);
+  if (on && entry && GHL_API_TOKEN && GHL_LOCATION_ID) {
+    try { await addGhlTag(entry, GHL_TAG_COMP); } catch (e) { console.error('[ghl] comp tag failed', e.message); }
+  }
+  res.redirect('/admin?key=' + encodeURIComponent(req.query.key));
+});
+
 // Archive browser with per-entry restore
 archive.mount(app, {
   DATA_DIR, guard, PROOF_DIR, SEAT_PRICE,
@@ -1035,7 +1087,7 @@ function addWalkin(entry) {
 
 // Reception check-in (tablet interface at the door)
 checkin.mount(app, {
-  DATA_DIR, guard, readAll, paidSet, addGhlTag, addWalkin,
+  DATA_DIR, guard, readAll, paidSet, compSet, addGhlTag, addWalkin,
   ATTENDED_TAG: GHL_TAG_ATTENDED,
   ghlReady: () => Boolean(GHL_API_TOKEN && GHL_LOCATION_ID),
 });
