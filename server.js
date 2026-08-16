@@ -680,6 +680,7 @@ app.get('/admin', (req, res) => {
       <a class="btn primary" href="/checkin?key=${k}">Check-in desk</a>
       <a class="btn ghost" href="/admin/questions?key=${k}">Questions</a>
       <a class="btn ghost" href="/admin/badges?key=${k}">Badges</a>
+      <a class="btn ghost" href="/guides.html" target="_blank">Desk guide</a>
     </div>
     <div class="grp">
       <span class="lbl">On the screen</span>
@@ -689,6 +690,7 @@ app.get('/admin', (req, res) => {
     </div>
     <div class="grp">
       <span class="lbl">Afterwards</span>
+      <a class="btn ghost" href="/admin/decks?key=${k}">Slide decks</a>
       <a class="btn ghost" href="/admin/feedback?key=${k}">Feedback</a>
       <a class="btn ghost" href="/admin/stats?key=${k}">Visitor stats</a>
       <a class="btn ghost" href="/admin.csv?key=${k}">CSV</a>
