@@ -428,6 +428,8 @@ function guard(req, res) {
   return true;
 }
 
+// Card layout rather than a wide table: this is opened on a phone as often as
+// on a laptop, and a 14-column table is unusable on a 390px screen.
 app.get('/admin', (req, res) => {
   if (!guard(req, res)) return;
   const rows = readAll();
@@ -435,37 +437,88 @@ app.get('/admin', (req, res) => {
   const paid = paidSet();
   const k = encodeURIComponent(req.query.key);
   const money = (n) => 'IDR ' + Number(n).toLocaleString('en-US');
-  const tr = rows.map((r) => {
+
+  const cards = rows.map((r) => {
     const isPaid = paid.get(r.email) === true;
     const due = (r.guests || 1) * SEAT_PRICE;
     const proof = r.proofFile
-      ? `<a href="/admin/proof?key=${k}&file=${encodeURIComponent(r.proofFile)}" target="_blank">view</a>`
-      : (r.orderId ? '<span style="color:#999">auto</span>' : '<span style="color:#999">none</span>');
+      ? `<a class="lnk" href="/admin/proof?key=${k}&file=${encodeURIComponent(r.proofFile)}" target="_blank">View proof</a>`
+      : '';
     const action = isPaid
-      ? '<span style="color:#137333;font-weight:600">PAID</span>'
-      : `<a href="/admin/verify?key=${k}&email=${encodeURIComponent(r.email)}">mark paid</a>`;
-    return `<tr${isPaid ? ' style="background:#f2fbf3"' : ''}><td>${esc(r.ts.slice(0, 16).replace('T', ' '))}</td><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${esc(r.phone)}</td><td>${esc(r.company)}</td><td>${esc(r.role)}</td><td>${esc(r.properties)}</td><td>${esc(r.employees)}</td><td>${esc(r.pms)}</td><td>${esc(r.pain)}</td><td>${esc(r.guests)}</td><td>${money(due)}</td><td>${proof}</td><td>${action}</td></tr>`;
+      ? '<span class="tag paid">PAID</span>'
+      : `<a class="lnk mark" href="/admin/verify?key=${k}&email=${encodeURIComponent(r.email)}">Mark paid</a>`;
+    const details = [r.role, r.properties ? r.properties + ' properties' : '', r.employees ? r.employees + ' staff' : '',
+      r.pms, r.pain].filter(Boolean).map((x) => `<span class="chip">${esc(x)}</span>`).join('');
+    return `<article class="card${isPaid ? ' ok' : ''}">
+      <header><h3>${esc(r.name)}</h3><span class="amt">${money(due)}</span></header>
+      <p class="co">${esc(r.company || '\u2014')}</p>
+      <p class="ct"><a href="mailto:${esc(r.email)}">${esc(r.email)}</a><br>
+        <a href="tel:${esc(r.phone)}">${esc(r.phone)}</a></p>
+      <div class="chips"><span class="chip seats">${esc(r.guests)} seat${r.guests > 1 ? 's' : ''}</span>${details}</div>
+      <footer><span class="ts">${esc(r.ts.slice(0, 16).replace('T', ' '))} UTC</span>
+        <span class="acts">${proof}${action}</span></footer>
+    </article>`;
   }).join('');
+
   const seats = rows.reduce((a, r) => a + (r.guests || 1), 0);
-  const totalDue = seats * SEAT_PRICE;
-  res.send(`<!doctype html><meta charset="utf-8"><title>Registrations (${rows.length})</title>
-  <style>body{font-family:system-ui;padding:24px;background:#F7F4EE}h1{font-size:20px}
-  table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid #ddd;padding:6px 10px;font-size:14px;text-align:left}
-  .bar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
-  .btn{display:inline-block;padding:8px 14px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none}
+  const paidCount = rows.filter((r) => paid.get(r.email) === true).length;
+  res.send(`<!doctype html><html lang="en"><head>
+  <meta charset="utf-8"><title>Registrations (${rows.length})</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="CHA-08 Admin">
+  <link rel="apple-touch-icon" href="/img/appicon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+  :root{--cream:#F7F4EE;--gold:#F6BB12;--grey:#666}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:Inter,system-ui,sans-serif;background:var(--cream);color:#111;padding:18px;
+    padding-bottom:calc(18px + env(safe-area-inset-bottom))}
+  h1{font-size:19px;line-height:1.35}
+  h1 small{display:block;font-size:13.5px;color:var(--grey);font-weight:500;margin-top:3px}
+  .bar{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}
+  .btn{flex:1 1 auto;text-align:center;padding:11px 14px;border-radius:9px;font-size:14px;
+    font-weight:600;text-decoration:none;white-space:nowrap}
   .btn.primary{background:#111;color:#fff}
   .btn.ghost{background:#fff;color:#333;border:1px solid #ddd}
-  .btn.danger{background:#fff;color:#a33;border:1px solid #e3bcbc;margin-left:auto}
-  .btn.danger:hover{background:#fdf3f3}</style>
-  <h1>Registrations: ${rows.length} &middot; ${seats} seats &middot; paid: ${rows.filter((r) => paid.get(r.email) === true).length} &middot; total: ${money(totalDue)}</h1>
+  .btn.danger{background:#fff;color:#a33;border:1px solid #e3bcbc}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
+  .card{background:#fff;border:1px solid #e5e0d5;border-radius:14px;padding:16px 18px}
+  .card.ok{background:#F7FCF8;border-color:#cfe8d4}
+  .card header{display:flex;align-items:baseline;gap:10px}
+  .card h3{font-size:17px;flex:1;min-width:0;overflow-wrap:anywhere}
+  .amt{font-weight:700;font-size:15px;white-space:nowrap}
+  .co{color:var(--grey);font-size:14px;margin-top:2px;overflow-wrap:anywhere}
+  .ct{font-size:14px;margin-top:8px;line-height:1.6;overflow-wrap:anywhere}
+  .ct a{color:#111}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .chip{background:#F2EEE5;border-radius:20px;padding:4px 10px;font-size:12px;font-weight:600}
+  .chip.seats{background:#111;color:#fff}
+  .card footer{display:flex;align-items:center;gap:12px;margin-top:12px;padding-top:10px;
+    border-top:1px solid #eee7db;flex-wrap:wrap}
+  .ts{font-size:12px;color:#999}
+  .acts{margin-left:auto;display:flex;gap:10px;align-items:center}
+  .lnk{font-size:14px;font-weight:600;color:#111;text-decoration:none;padding:8px 12px;
+    border:1px solid #ddd;border-radius:8px;background:#fff}
+  .lnk.mark{background:var(--gold);border-color:var(--gold)}
+  .tag.paid{color:#137333;font-weight:700;font-size:13px;letter-spacing:.5px}
+  .empty{background:#fff;border:1px dashed #d8d2c4;border-radius:14px;padding:40px 20px;
+    text-align:center;color:var(--grey)}
+  @media(max-width:600px){body{padding:14px}.btn{flex:1 1 46%}}
+  </style></head><body>
+  <h1>Registrations: ${rows.length}
+    <small>${seats} seats &middot; ${paidCount} paid &middot; ${money(seats * SEAT_PRICE)} total</small></h1>
   <div class="bar">
-    <a class="btn primary" href="/admin.csv?key=${k}">Download CSV</a>
-    <a class="btn ghost" href="/checkin?key=${k}" target="_blank">Check-in desk</a>
+    <a class="btn primary" href="/checkin?key=${k}">Check-in desk</a>
     <a class="btn ghost" href="/admin/stats?key=${k}">Visitor stats</a>
-    <a class="btn ghost" href="/admin/resync?key=${k}">Resync to GHL</a>
-    <a class="btn danger" href="/admin/reset?key=${k}">Clear all data…</a>
+    <a class="btn ghost" href="/admin.csv?key=${k}">CSV</a>
+    <a class="btn ghost" href="/admin/resync?key=${k}">Resync</a>
+    <a class="btn danger" href="/admin/reset?key=${k}">Clear\u2026</a>
   </div>
-  <table><tr><th>Time (UTC)</th><th>Name</th><th>Email</th><th>Phone/WA</th><th>Property/Company</th><th>Role</th><th>Properties</th><th>Employees</th><th>PMS</th><th>Pain point</th><th>Seats</th><th>Amount</th><th>Proof</th><th>Payment</th></tr>${tr}</table>`);
+  ${rows.length ? `<div class="grid">${cards}</div>` : '<div class="empty">No registrations yet.</div>'}
+  </body></html>`);
 });
 
 app.get('/admin.csv', (req, res) => {
@@ -500,13 +553,14 @@ app.get('/admin/resync', async (req, res) => {
     catch (e) { logSync(entry.email, 'failed', e.message); errors.push(entry.email + ': ' + e.message); }
   }
   const k = encodeURIComponent(req.query.key);
-  res.send(`<!doctype html><meta charset="utf-8"><title>Resync</title>
-  <style>body{font-family:system-ui;padding:32px;background:#F7F4EE;max-width:640px}
-  li{font-size:14px;color:#a33}</style>
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Resync</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>body{font-family:system-ui;padding:24px;background:#F7F4EE;max-width:640px}
+  li{font-size:14px;color:#a33}</style></head><body>
   <h2>GHL resync</h2>
   <p>${pending.length} registration(s) were not marked as sent. ${sent} synced now.</p>
   ${errors.length ? '<ul>' + errors.map((e) => `<li>${String(e).replace(/[<>&]/g, '')}</li>`).join('') + '</ul>' : ''}
-  <p><a href="/admin?key=${k}">\u2190 Back to registrations</a></p>`);
+  <p><a href="/admin?key=${k}">\u2190 Back to registrations</a></p></body></html>`);
 });
 
 // Midtrans calls this when a payment settles. Public endpoint - every payload
@@ -590,16 +644,21 @@ app.get('/admin/stats', (req, res) => {
   const refRows = [...refs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
     .map(([r, n]) => `<tr><td>${String(r).replace(/[<>&]/g, '')}</td><td>${n}</td></tr>`).join('');
 
-  res.send(`<!doctype html><meta charset="utf-8"><title>Visitor stats</title>
-  <style>body{font-family:system-ui;padding:24px;background:#F7F4EE;max-width:1000px}
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Visitor stats</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111111">
+  <link rel="apple-touch-icon" href="/img/appicon.png">
+  <style>body{font-family:system-ui;padding:18px;background:#F7F4EE;max-width:1000px;
+    padding-bottom:calc(18px + env(safe-area-inset-bottom))}
   h1{font-size:20px}h2{font-size:15px;margin:24px 0 6px}
-  table{border-collapse:collapse;width:100%;background:#fff;margin-top:6px}
-  td,th{border:1px solid #ddd;padding:6px 10px;font-size:14px;text-align:left}
-  .cards{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0}
-  .card{background:#fff;border:1px solid #e5e0d5;border-radius:10px;padding:14px 18px;min-width:120px}
-  .card .n{font-size:26px;font-weight:700}
-  .card .l{font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px}
-  a{color:#333}</style>
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{border-collapse:collapse;width:100%;min-width:460px;background:#fff;margin-top:6px}
+  td,th{border:1px solid #ddd;padding:8px 10px;font-size:14px;text-align:left;white-space:nowrap}
+  .cards{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:14px 0}
+  .card{background:#fff;border:1px solid #e5e0d5;border-radius:10px;padding:14px 16px}
+  .card .n{font-size:24px;font-weight:700}
+  .card .l{font-size:11.5px;color:#666;text-transform:uppercase;letter-spacing:1px}
+  a{color:#333}</style></head><body>
   <p><a href="/admin?key=${k}">\u2190 Back to registrations</a></p>
   <h1>Visitor statistics</h1>
   <div class="cards">
@@ -610,11 +669,11 @@ app.get('/admin/stats', (req, res) => {
     <div class="card"><div class="n">${totalViews ? Math.round((mobile / totalViews) * 100) : 0}%</div><div class="l">On mobile</div></div>
   </div>
   <h2>By day</h2>
-  <table><tr><th>Day</th><th>Views</th><th>Visitors</th><th>Registrations</th><th></th></tr>${rows || '<tr><td colspan="5">No visits recorded yet.</td></tr>'}</table>
+  <div class="scroll"><table><tr><th>Day</th><th>Views</th><th>Visitors</th><th>Registrations</th><th></th></tr>${rows || '<tr><td colspan="5">No visits recorded yet.</td></tr>'}</table></div>
   <h2>Where visitors came from</h2>
-  <table><tr><th>Source</th><th>Views</th></tr>${refRows || '<tr><td colspan="2">\u2014</td></tr>'}</table>
+  <div class="scroll"><table><tr><th>Source</th><th>Views</th></tr>${refRows || '<tr><td colspan="2">\u2014</td></tr>'}</table></div>
   <p style="margin-top:20px;font-size:13px;color:#666">Visitors are counted by a salted daily hash of IP and browser \u2014 no IP addresses are stored and hashes cannot be linked across days. Known bots are excluded.</p>
-  <p><a href="/admin?key=${k}">\u2190 Back to registrations</a></p>`);
+  <p><a href="/admin?key=${k}">\u2190 Back to registrations</a></p></body></html>`);
 });
 
 // Clear all registration data. Nothing is deleted: files and proof images are
@@ -622,8 +681,10 @@ app.get('/admin/stats', (req, res) => {
 // always recoverable. Needs the admin key AND the reset password, and the
 // password travels by POST so it never lands in a URL, log or browser history.
 function resetPage(k, error) {
-  return '<!doctype html><meta charset="utf-8"><title>Clear all data</title>'
-    + '<body style="font-family:system-ui;padding:32px;background:#F7F4EE;max-width:560px">'
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Clear all data</title>'
+    + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    + '<link rel="apple-touch-icon" href="/img/appicon.png"></head>'
+    + '<body style="font-family:system-ui;padding:24px;background:#F7F4EE;max-width:560px">'
     + '<h2 style="margin-bottom:6px">Clear all registration data?</h2>'
     + '<p style="color:#444;line-height:1.5">This moves every registration, payment record and payment '
     + 'screenshot into an archive folder. The list will be empty afterwards. Nothing is permanently deleted.</p>'
@@ -631,11 +692,11 @@ function resetPage(k, error) {
     + `<form method="POST" action="/admin/reset?key=${k}" style="margin-top:18px">`
     + '<label style="display:block;font-weight:600;font-size:14px;margin-bottom:6px">Reset password</label>'
     + '<input type="password" name="password" autocomplete="off" autofocus '
-    + 'style="width:100%;padding:11px 12px;border:1px solid #d8d2c4;border-radius:9px;font-size:15px;background:#fff">'
-    + '<div style="margin-top:16px;display:flex;gap:12px;align-items:center">'
-    + '<button type="submit" style="background:#a33;color:#fff;border:0;border-radius:8px;padding:12px 20px;'
+    + 'style="width:100%;padding:13px 12px;border:1px solid #d8d2c4;border-radius:9px;font-size:16px;background:#fff">'
+    + '<div style="margin-top:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
+    + '<button type="submit" style="background:#a33;color:#fff;border:0;border-radius:8px;padding:13px 20px;'
     + 'font-size:15px;font-weight:600;cursor:pointer">Clear all data</button>'
-    + `<a href="/admin?key=${k}" style="color:#555">Cancel</a></div></form></body>`;
+    + `<a href="/admin?key=${k}" style="color:#555">Cancel</a></div></form></body></html>`;
 }
 
 app.get('/admin/reset', (req, res) => {
@@ -675,10 +736,12 @@ app.post('/admin/reset', (req, res) => {
   }
 
   console.log('[admin] data cleared, archived to', archive, '| files:', moved.join(','), '| proofs:', proofs);
-  res.send('<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:32px;background:#F7F4EE">'
+  res.send('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width, initial-scale=1"></head>'
+    + '<body style="font-family:system-ui;padding:24px;background:#F7F4EE">'
     + '<h2>Done \u2014 the list is empty.</h2>'
     + `<p>Archived ${moved.length} data file(s) and ${proofs} payment screenshot(s).</p>`
-    + `<p><a href="/admin?key=${k}">Back to registrations</a></p></body>`);
+    + `<p><a href="/admin?key=${k}">Back to registrations</a></p></body></html>`);
 });
 
 // Serve a payment screenshot (admin only - these contain personal data)
