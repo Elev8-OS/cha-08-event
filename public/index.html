@@ -387,14 +387,20 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
       seatsLeft = s.left;
       var el = document.getElementById('seatbar');
       el.className = 'seatbar';
+
+      // A count only persuades once it is low. Early on, "63 of 70 available"
+      // tells a visitor the room is empty and there is no hurry - so we stay
+      // quiet until scarcity is real, or the room is actually full.
+      var SHOW_FROM = 20;
       if (s.full) {
         el.textContent = 'All 70 seats are taken \u2014 join the waitlist below.';
         el.classList.add('full');
-      } else if (s.left <= 15) {
+      } else if (s.left <= SHOW_FROM) {
         el.textContent = 'Only ' + s.left + ' seat' + (s.left > 1 ? 's' : '') + ' left.';
-        el.classList.add('low');
+        if (s.left <= 10) el.classList.add('low');
       } else {
-        el.textContent = s.left + ' of 70 seats still available.';
+        el.style.display = 'none';
+        return;
       }
       el.style.display = 'block';
     } catch (e) { /* never block the form on this */ }
