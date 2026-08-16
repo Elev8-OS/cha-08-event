@@ -226,18 +226,24 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:34px}
   var STOP = ('a an the is are was were do does did how what when where why who which '
     + 'to of in on for with and or if it its this that we you your our my i can could '
     + 'should would will shall have has had be been being at as by from about not no '
-    + 'yes there their them they he she his her me us so than then too very just');
+    + 'yes there their them they he she his her me us so than then too very just only');
   var STOPSET = {};
   STOP.split(' ').forEach(function (w) { STOPSET[w] = 1; });
 
   function words(s) {
-    return String(s).toLowerCase()
-      .replace(/[^a-z0-9\\s]/g, ' ')
-      .split(/\\s+/)
-      .filter(function (w) { return w.length > 2 && !STOPSET[w]; })
-      // Crude stemming, but enough: "reporting" and "report" are the same
-      // question, and a real stemmer is not worth 30 KB on a phone.
-      .map(function (w) { return w.replace(/(ings|ing|ies|ed|es|s)$/, ''); });
+    // No backslash escapes here on purpose: this code is embedded in a
+    // template literal, and something like a backslash-s loses its backslash
+    // on the way to the browser - which once made this split on the letter s.
+    // Anything that is not a letter or digit is a separator instead.
+    var out = [];
+    String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').forEach(function (w) {
+      if (w.length > 2 && !STOPSET[w]) {
+        // Crude stemming, but enough: "reporting" and "report" are the
+        // same question, and a real stemmer is not worth 30 KB on a phone.
+        out.push(w.replace(/(ings|ing|ies|ed|es|s)$/, ''));
+      }
+    });
+    return out;
   }
 
   function similarity(a, b) {
@@ -246,14 +252,20 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:34px}
     var setB = {}, hits = 0, seen = {};
     B.forEach(function (w) { setB[w] = 1; });
     A.forEach(function (w) { if (setB[w] && !seen[w]) { seen[w] = 1; hits++; } });
-    // Dice coefficient: forgiving about one question being longer than the other
+    // Someone typing one or two words is searching, not writing a question:
+    // if those words appear, that is a hit regardless of how long the stored
+    // question happens to be. Dice would punish exactly that case.
+    if (A.length <= 2 && hits === A.length) return 1;
+    // Otherwise Dice: forgiving about one question being longer than the other
     return (2 * hits) / (A.length + B.length);
   }
 
   function suggest() {
     var text = document.getElementById('text').value;
     var box = document.getElementById('similar');
-    if (dismissed || words(text).length < 2) { box.style.display = 'none'; return; }
+    // One distinctive word is enough - somebody typing just "APOA" should see
+    // the APOA question. The score threshold below still filters the noise.
+    if (dismissed || words(text).length < 1) { box.style.display = 'none'; return; }
     var hits = all.map(function (q) { return { q: q, s: similarity(text, q.text) }; })
       .filter(function (x) { return x.s >= 0.28; })
       .sort(function (x, y) { return y.s - x.s; })
@@ -279,7 +291,7 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:34px}
         var on = voted[q.id] ? ' on' : '';
         return '<div class="q"><p>' + esc(q.text)
           + '<span class="who">' + (q.session ? esc(q.session) : 'General')
-          + (q.name ? ' \\u00b7 ' + esc(q.name) : '') + '</span></p>'
+          + (q.name ? ' &middot; ' + esc(q.name) : '') + '</span></p>'
           + '<button type="button" class="up' + on + '" data-id="' + q.id + '">' + q.votes
           + '<span>' + (voted[q.id] ? 'backed' : 'back it') + '</span></button></div>';
       }).join('');
@@ -332,7 +344,7 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:34px}
     var text = document.getElementById('text').value.trim();
     err.style.display = 'none';
     if (text.length < 5) { err.textContent = 'Please write your question first.'; err.style.display = 'block'; return; }
-    this.disabled = true; this.textContent = 'Sending\\u2026';
+    this.disabled = true; this.textContent = 'Sending&hellip;';
     try {
       var r = await fetch('/api/questions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
