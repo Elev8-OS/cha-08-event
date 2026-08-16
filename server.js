@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const payment = require('./payment');
+const checkin = require('./checkin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -118,6 +119,7 @@ const GHL_TAG = process.env.GHL_TAG || 'cha-08-event';
 const GHL_SOURCE = process.env.GHL_SOURCE || 'CHA-08 landing page';
 const GHL_API_BASE = process.env.GHL_API_BASE || 'https://services.leadconnectorhq.com';
 const GHL_TAG_PAID = process.env.GHL_TAG_PAID || (GHL_TAG + ' - Paid');
+const GHL_TAG_ATTENDED = process.env.GHL_TAG_ATTENDED || (GHL_TAG + ' - Attended');
 // Custom field ids in GHL. Values must match the picklists configured there.
 const GHL_CF_PROPERTIES = process.env.GHL_CF_PROPERTIES || 'igDIndbcECJUpM96Kk7V'; // Number of Properties
 const GHL_CF_PMS = process.env.GHL_CF_PMS || '3Z3qAyZ0luOBmHeQh2AD';               // Current PMS / Software
@@ -235,7 +237,7 @@ async function sendToGHL(entry) {
   return 'disabled';
 }
 
-// Add a single tag to a contact (used when payment is verified)
+// Add a single tag to a contact (used when payment is verified, or at check-in)
 async function addGhlTag(entry, tag) {
   const headers = {
     Authorization: 'Bearer ' + GHL_API_TOKEN,
@@ -458,6 +460,7 @@ app.get('/admin', (req, res) => {
   <h1>Registrations: ${rows.length} &middot; ${seats} seats &middot; paid: ${rows.filter((r) => paid.get(r.email) === true).length} &middot; total: ${money(totalDue)}</h1>
   <div class="bar">
     <a class="btn primary" href="/admin.csv?key=${k}">Download CSV</a>
+    <a class="btn ghost" href="/checkin?key=${k}" target="_blank">Check-in desk</a>
     <a class="btn ghost" href="/admin/stats?key=${k}">Visitor stats</a>
     <a class="btn ghost" href="/admin/resync?key=${k}">Resync to GHL</a>
     <a class="btn danger" href="/admin/reset?key=${k}">Clear all data…</a>
@@ -648,7 +651,7 @@ app.post('/admin/reset', (req, res) => {
   fs.mkdirSync(archive, { recursive: true });
 
   const moved = [];
-  ['registrations.jsonl', 'payments.jsonl', 'pending.jsonl', 'ghl-sync.jsonl', 'views.jsonl'].forEach((f) => {
+  ['registrations.jsonl', 'payments.jsonl', 'pending.jsonl', 'ghl-sync.jsonl', 'views.jsonl', 'checkins.jsonl'].forEach((f) => {
     const src = path.join(DATA_DIR, f);
     if (fs.existsSync(src)) { fs.renameSync(src, path.join(archive, f)); moved.push(f); }
   });
@@ -696,6 +699,13 @@ app.get('/admin/verify', async (req, res) => {
     try { await addGhlTag(entry, GHL_TAG_PAID); } catch (e) { console.error('[ghl] paid tag failed', e.message); }
   }
   res.redirect('/admin?key=' + encodeURIComponent(req.query.key));
+});
+
+// Reception check-in (tablet interface at the door)
+checkin.mount(app, {
+  DATA_DIR, guard, readAll, paidSet, addGhlTag,
+  ATTENDED_TAG: GHL_TAG_ATTENDED,
+  ghlReady: () => Boolean(GHL_API_TOKEN && GHL_LOCATION_ID),
 });
 
 app.get('/health', (_req, res) => res.json({
