@@ -8,9 +8,17 @@
  * Bump VERSION whenever behaviour changes, and add the entry at the top.
  */
 
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 
 const CHANGELOG = [
+  {
+    v: '1.6.1', date: '2026-08-16', title: 'Badges to fit the pouches',
+    items: [
+      'Name badges are 70x105 mm portrait, four per A4 sheet - the paper size '
+        + 'that fits the lanyard pouches, not the old 90x54 mm card.',
+      'Bigger name, venue and date on every badge.',
+    ],
+  },
   {
     v: '1.6.0', date: '2026-08-16', title: 'Counting people, not bookings',
     items: [
@@ -36,7 +44,7 @@ const CHANGELOG = [
       'Feedback form with an admin summary, plus a list of who attended and has '
         + 'not answered yet.',
       'Feedback links from email identify the sender; the projected QR stays anonymous.',
-      'Printable name badges, ten per A4 sheet.',
+      'Printable name badges.',
     ],
   },
   {
