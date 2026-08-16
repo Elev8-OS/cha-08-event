@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const payment = require('./payment');
 
 const app = express();
@@ -13,6 +14,55 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 
 app.use(express.json({ limit: '9mb' }));
 app.use(express.urlencoded({ extended: false }));
+
+// --- Lightweight, privacy-preserving page analytics ---------------------
+// One line per view. Visitors are identified by a hash of IP + user agent
+// mixed with the date and a server-side salt, so no IP is ever stored and a
+// hash cannot be traced back or linked across days.
+const VIEWS_FILE = () => path.join(DATA_DIR, 'views.jsonl');
+// Salt kept on disk so restarts don't reset visitor counts.
+const SALT_FILE = path.join(DATA_DIR, '.salt');
+let SALT;
+try {
+  SALT = fs.existsSync(SALT_FILE) ? fs.readFileSync(SALT_FILE, 'utf8').trim() : '';
+  if (!SALT) { SALT = crypto.randomBytes(16).toString('hex'); fs.writeFileSync(SALT_FILE, SALT); }
+} catch { SALT = crypto.randomBytes(16).toString('hex'); }
+
+function visitorHash(req, day) {
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  return crypto.createHash('sha256')
+    .update(day + SALT + ip + (req.headers['user-agent'] || ''))
+    .digest('hex').slice(0, 16);
+}
+
+function refHost(req) {
+  const r = req.headers.referer || req.headers.referrer || '';
+  if (!r) return 'direct';
+  try {
+    const h = new URL(r).hostname.replace(/^www\./, '');
+    return h.endsWith('elev8-suite.com') ? 'direct' : h;
+  } catch { return 'other'; }
+}
+
+// Bots inflate the numbers and tell us nothing about real interest
+const BOT = /bot|crawler|spider|crawling|preview|facebookexternalhit|slurp|bingpreview|headless|monitor|uptime/i;
+
+app.get('/', (req, res, next) => {
+  try {
+    if (!BOT.test(req.headers['user-agent'] || '')) {
+      const day = new Date().toISOString().slice(0, 10);
+      fs.appendFileSync(VIEWS_FILE(), JSON.stringify({
+        d: day,
+        t: new Date().toISOString().slice(11, 16),
+        v: visitorHash(req, day),
+        r: refHost(req),
+        m: /mobile|android|iphone|ipad/i.test(req.headers['user-agent'] || '') ? 'mobile' : 'desktop',
+      }) + '\n');
+    }
+  } catch (e) { /* never let analytics break the page */ }
+  next();
+});
+
 // Never let a browser hold on to a stale page: content changes right up to the event
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, filePath) => {
@@ -408,6 +458,7 @@ app.get('/admin', (req, res) => {
   <h1>Registrations: ${rows.length} &middot; ${seats} seats &middot; paid: ${rows.filter((r) => paid.get(r.email) === true).length} &middot; total: ${money(totalDue)}</h1>
   <div class="bar">
     <a class="btn primary" href="/admin.csv?key=${k}">Download CSV</a>
+    <a class="btn ghost" href="/admin/stats?key=${k}">Visitor stats</a>
     <a class="btn ghost" href="/admin/resync?key=${k}">Resync to GHL</a>
     <a class="btn danger" href="/admin/reset?key=${k}">Clear all data…</a>
   </div>
@@ -485,6 +536,76 @@ app.get('/api/payment/status', async (req, res) => {
   }
 });
 
+// Visitor statistics, aggregated on the fly from views.jsonl
+app.get('/admin/stats', (req, res) => {
+  if (!guard(req, res)) return;
+  const k = encodeURIComponent(req.query.key);
+  const views = [];
+  if (fs.existsSync(VIEWS_FILE())) {
+    fs.readFileSync(VIEWS_FILE(), 'utf8').trim().split('\n').filter(Boolean).forEach((l) => {
+      try { views.push(JSON.parse(l)); } catch {}
+    });
+  }
+  const regs = readAll();
+
+  const byDay = new Map();
+  const refs = new Map();
+  let mobile = 0;
+  views.forEach((v) => {
+    if (!byDay.has(v.d)) byDay.set(v.d, { views: 0, visitors: new Set() });
+    const d = byDay.get(v.d);
+    d.views++; d.visitors.add(v.v);
+    refs.set(v.r, (refs.get(v.r) || 0) + 1);
+    if (v.m === 'mobile') mobile++;
+  });
+  regs.forEach((r) => {
+    const day = String(r.ts).slice(0, 10);
+    if (!byDay.has(day)) byDay.set(day, { views: 0, visitors: new Set() });
+    byDay.get(day).regs = (byDay.get(day).regs || 0) + 1;
+  });
+
+  const days = [...byDay.keys()].sort().reverse();
+  const totalViews = views.length;
+  const totalVisitors = new Set(views.map((v) => v.v)).size;
+  const conv = totalVisitors ? ((regs.length / totalVisitors) * 100).toFixed(1) : '0.0';
+  const maxViews = Math.max(1, ...days.map((d) => byDay.get(d).views));
+
+  const rows = days.map((d) => {
+    const x = byDay.get(d);
+    const bar = Math.round((x.views / maxViews) * 100);
+    return `<tr><td>${d}</td><td>${x.views}</td><td>${x.visitors.size}</td><td>${x.regs || 0}</td>
+      <td style="width:40%"><div style="background:#F6BB12;height:14px;border-radius:3px;width:${bar}%"></div></td></tr>`;
+  }).join('');
+
+  const refRows = [...refs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
+    .map(([r, n]) => `<tr><td>${String(r).replace(/[<>&]/g, '')}</td><td>${n}</td></tr>`).join('');
+
+  res.send(`<!doctype html><meta charset="utf-8"><title>Visitor stats</title>
+  <style>body{font-family:system-ui;padding:24px;background:#F7F4EE;max-width:1000px}
+  h1{font-size:20px}h2{font-size:15px;margin:24px 0 6px}
+  table{border-collapse:collapse;width:100%;background:#fff;margin-top:6px}
+  td,th{border:1px solid #ddd;padding:6px 10px;font-size:14px;text-align:left}
+  .cards{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0}
+  .card{background:#fff;border:1px solid #e5e0d5;border-radius:10px;padding:14px 18px;min-width:120px}
+  .card .n{font-size:26px;font-weight:700}
+  .card .l{font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px}
+  a{color:#333}</style>
+  <h1>Visitor statistics</h1>
+  <div class="cards">
+    <div class="card"><div class="n">${totalViews}</div><div class="l">Page views</div></div>
+    <div class="card"><div class="n">${totalVisitors}</div><div class="l">Visitors</div></div>
+    <div class="card"><div class="n">${regs.length}</div><div class="l">Registrations</div></div>
+    <div class="card"><div class="n">${conv}%</div><div class="l">Conversion</div></div>
+    <div class="card"><div class="n">${totalViews ? Math.round((mobile / totalViews) * 100) : 0}%</div><div class="l">On mobile</div></div>
+  </div>
+  <h2>By day</h2>
+  <table><tr><th>Day</th><th>Views</th><th>Visitors</th><th>Registrations</th><th></th></tr>${rows || '<tr><td colspan="5">No visits recorded yet.</td></tr>'}</table>
+  <h2>Where visitors came from</h2>
+  <table><tr><th>Source</th><th>Views</th></tr>${refRows || '<tr><td colspan="2">\u2014</td></tr>'}</table>
+  <p style="margin-top:20px;font-size:13px;color:#666">Visitors are counted by a salted daily hash of IP and browser \u2014 no IP addresses are stored and hashes cannot be linked across days. Known bots are excluded.</p>
+  <p><a href="/admin?key=${k}">\u2190 Back to registrations</a></p>`);
+});
+
 // Clear all registration data. Nothing is deleted: files and proof images are
 // moved into a timestamped archive folder inside DATA_DIR, so a mistake is
 // always recoverable. Needs the admin key AND the reset password, and the
@@ -527,7 +648,7 @@ app.post('/admin/reset', (req, res) => {
   fs.mkdirSync(archive, { recursive: true });
 
   const moved = [];
-  ['registrations.jsonl', 'payments.jsonl', 'pending.jsonl', 'ghl-sync.jsonl'].forEach((f) => {
+  ['registrations.jsonl', 'payments.jsonl', 'pending.jsonl', 'ghl-sync.jsonl', 'views.jsonl'].forEach((f) => {
     const src = path.join(DATA_DIR, f);
     if (fs.existsSync(src)) { fs.renameSync(src, path.join(archive, f)); moved.push(f); }
   });
