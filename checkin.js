@@ -8,6 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const ghl = require('./ghl');
 
 function mount(app, deps) {
   const { DATA_DIR, guard, readAll, paidSet, compSet, addGhlTag, removeGhlTag,
@@ -84,7 +85,7 @@ function mount(app, deps) {
       // Undo has to reach the CRM as well, otherwise the Attended tag keeps
       // claiming someone was here who never was.
       if (arrived) await addGhlTag(entry, ATTENDED_TAG);
-      else await removeGhlTag(entry, ATTENDED_TAG);
+      else await (removeGhlTag || ghl.removeTag)(entry, ATTENDED_TAG);
     } catch (e) { console.error('[checkin] tag sync failed', e.message); }
   });
 
