@@ -62,7 +62,6 @@ function mount(app) {
 }
 
 function page(s) {
-  const url = HOST + (s.path === '/' ? '' : s.path);
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -107,7 +106,7 @@ h1{font-family:'Archivo Black',sans-serif;font-size:6.5vh;line-height:1.05;margi
 
 <div class="qr"><img src="${s.img}" alt="QR code"></div>
 
-<div class="url">${url.split('/')[0]}<span>${url.slice(url.indexOf('/')) || ''}</span></div>
+<div class="url">${HOST}<span>${s.path === '/' ? '' : s.path}</span></div>
 <div class="hint">Point your camera at the code \u2014 no app needed.</div>
 
 </body></html>`;
