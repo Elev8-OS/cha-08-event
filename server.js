@@ -472,6 +472,51 @@ app.get('/api/payment/status', async (req, res) => {
   }
 });
 
+// Clear all registration data. Nothing is deleted: files and proof images are
+// moved into a timestamped archive folder inside DATA_DIR, so a mistake is
+// always recoverable. Requires an explicit confirm=YES to avoid accidents.
+app.get('/admin/reset', (req, res) => {
+  if (!guard(req, res)) return;
+  if (req.query.confirm !== 'YES') {
+    return res.status(400).send(
+      '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:32px;background:#F7F4EE">'
+      + '<h2>Clear all registration data?</h2>'
+      + '<p>This moves every registration, payment record and payment screenshot into an archive folder. '
+      + 'The admin list will be empty afterwards. Nothing is permanently deleted.</p>'
+      + `<p><a href="/admin/reset?key=${encodeURIComponent(req.query.key)}&confirm=YES" `
+      + 'style="display:inline-block;background:#111;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none">'
+      + 'Yes, clear the data</a>'
+      + `&nbsp;&nbsp;<a href="/admin?key=${encodeURIComponent(req.query.key)}">Cancel</a></p></body>`);
+  }
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const archive = path.join(DATA_DIR, 'archive-' + stamp);
+  fs.mkdirSync(archive, { recursive: true });
+
+  const moved = [];
+  ['registrations.jsonl', 'payments.jsonl', 'pending.jsonl', 'ghl-sync.jsonl'].forEach((f) => {
+    const src = path.join(DATA_DIR, f);
+    if (fs.existsSync(src)) { fs.renameSync(src, path.join(archive, f)); moved.push(f); }
+  });
+
+  let proofs = 0;
+  if (fs.existsSync(PROOF_DIR)) {
+    const dest = path.join(archive, 'proofs');
+    fs.mkdirSync(dest, { recursive: true });
+    fs.readdirSync(PROOF_DIR).forEach((f) => {
+      fs.renameSync(path.join(PROOF_DIR, f), path.join(dest, f));
+      proofs++;
+    });
+  }
+
+  console.log('[admin] data cleared, archived to', archive, '| files:', moved.join(','), '| proofs:', proofs);
+  res.send(
+    '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:32px;background:#F7F4EE">'
+    + '<h2>Done \u2014 the list is empty.</h2>'
+    + `<p>Archived ${moved.length} data file(s) and ${proofs} payment screenshot(s) to <code>${archive}</code>.</p>`
+    + `<p><a href="/admin?key=${encodeURIComponent(req.query.key)}">Back to registrations</a></p></body>`);
+});
+
 // Serve a payment screenshot (admin only - these contain personal data)
 app.get('/admin/proof', (req, res) => {
   if (!guard(req, res)) return;
