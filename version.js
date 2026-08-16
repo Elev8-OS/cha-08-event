@@ -8,9 +8,20 @@
  * Bump VERSION whenever behaviour changes, and add the entry at the top.
  */
 
-const VERSION = '1.6.1';
+const VERSION = '1.7.0';
 
 const CHANGELOG = [
+  {
+    v: '1.7.0', date: '2026-08-16', title: 'Questions from the room',
+    items: [
+      'A QR on the screen during the coffee break: people type the question they '
+        + 'did not want to ask in front of the room.',
+      'Questions can be backed rather than repeated, and the moderator sees them '
+        + 'sorted by how many people wanted them asked.',
+      'Marking one as asked removes it from the audience list too.',
+      'Admin toolbar: Questions, Questions QR and Feedback QR.',
+    ],
+  },
   {
     v: '1.6.1', date: '2026-08-16', title: 'Badges to fit the pouches',
     items: [
