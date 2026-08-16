@@ -2,9 +2,9 @@
  * Public slides page, linked from the follow-up emails (A7 / B3).
  *
  * The link goes out before the decks exist, so the page has to be live from
- * day one and simply say "not yet" for anything without a file. To publish a
- * deck, drop a PDF into public/decks/ and put its filename in the session
- * below - no other change needed.
+ * day one and simply say "not yet" for anything without a file. Decks are
+ * uploaded from the admin (see decks.js) and stored on the volume, so this
+ * page reads the current assignment rather than having filenames hard-coded.
  */
 
 const SESSIONS = [
@@ -46,15 +46,22 @@ const SESSIONS = [
   },
 ];
 
+const decks = require('./decks');
+
 function mount(app) {
+  // Deck management belongs with the page it feeds
+  decks.mount(app, { sessions: () => SESSIONS });
+
   app.get('/slides', (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    res.send(page());
+    res.send(page(decks.readMap()));
   });
 }
 
-function page() {
-  const any = SESSIONS.some((s) => s.file);
+function page(map) {
+  // A session's deck is whatever the admin last uploaded for it
+  const fileFor = (s) => (map[decks.slug(s.title)] || {}).file || s.file || '';
+  const any = SESSIONS.some((s) => fileFor(s));
   const rows = SESSIONS.map((s) => `
     <article class="s">
       <div class="txt">
@@ -62,8 +69,8 @@ function page() {
         <div class="sp">${s.speaker}</div>
         <p>${s.blurb}</p>
       </div>
-      ${s.file
-        ? `<a class="dl" href="/decks/${encodeURIComponent(s.file)}" download>Download PDF</a>`
+      ${fileFor(s)
+        ? `<a class="dl" href="/decks/${encodeURIComponent(fileFor(s))}" download>Download PDF</a>`
         : '<span class="soon">Coming soon</span>'}
     </article>`).join('');
 
