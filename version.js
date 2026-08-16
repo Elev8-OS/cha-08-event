@@ -8,9 +8,21 @@
  * Bump VERSION whenever behaviour changes, and add the entry at the top.
  */
 
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 
 const CHANGELOG = [
+  {
+    v: '1.7.1', date: '2026-08-16', title: 'Counting and finding things',
+    items: [
+      'Header counts seats throughout: a complimentary booking of two seats '
+        + 'was showing as one.',
+      'Duplicate questions are caught while typing, with the option to back the '
+        + 'existing one instead of asking it twice.',
+      'The registration screen showed the domain with a doubled last letter.',
+      'Admin buttons grouped by when you need them: on the day, on the screen, '
+        + 'afterwards, data.',
+    ],
+  },
   {
     v: '1.7.0', date: '2026-08-16', title: 'Questions from the room',
     items: [
@@ -18,7 +30,7 @@ const CHANGELOG = [
         + 'did not want to ask in front of the room.',
       'Questions can be backed rather than repeated, and the moderator sees them '
         + 'sorted by how many people wanted them asked.',
-      'Marking one as asked removes it from the audience list too.',
+      'Marking one as answered removes it from the audience list too.',
       'Admin toolbar: Questions, Questions QR and Feedback QR.',
     ],
   },
