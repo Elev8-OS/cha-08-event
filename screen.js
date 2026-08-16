@@ -3,6 +3,7 @@
  *
  * /screen           -> feedback QR, shown while closing the afternoon
  * /screen/register  -> registration QR, usable before and between sessions
+ * /screen/ask       -> question QR, on the wall through the coffee break
  *
  * Sized for a projector at the back of a room: the code fills roughly a third
  * of the height, the URL is spelled out underneath for anyone whose camera
@@ -17,6 +18,13 @@ const SCREENS = {
     lead: 'Three questions, under a minute. It decides what we run next.',
     img: '/img/qrfeedback.png',
   },
+  ask: {
+    path: '/ask',
+    kicker: 'COFFEE BREAK',
+    title: 'ASK ANYTHING',
+    lead: 'Type the question you did not want to ask out loud. We take them from the front afterwards.',
+    img: '/img/qrask.png',
+  },
   register: {
     path: '/',
     kicker: 'NOT REGISTERED YET?',
@@ -28,7 +36,13 @@ const SCREENS = {
 
 const HOST = process.env.PUBLIC_HOST || 'cha-08.elev8-suite.com';
 
+const questions = require('./questions');
+
 function mount(app) {
+  // Both are surfaces the room sees on the day, and mounting here keeps
+  // server.js untouched while the site is live in the run-up to the event.
+  questions.mount(app);
+
   app.get('/screen', (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     res.send(page(SCREENS.feedback));
@@ -37,6 +51,11 @@ function mount(app) {
   app.get('/screen/register', (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     res.send(page(SCREENS.register));
+  });
+
+  app.get('/screen/ask', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.send(page(SCREENS.ask));
   });
 }
 
