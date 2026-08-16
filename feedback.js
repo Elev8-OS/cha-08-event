@@ -18,7 +18,7 @@ const TOPICS = [
 ];
 
 function mount(app, deps) {
-  const { DATA_DIR, guard } = deps;
+  const { DATA_DIR, guard, registrations, checkedIn } = deps;
   const FILE = () => path.join(DATA_DIR, 'feedback.jsonl');
 
   function readAll() {
@@ -28,9 +28,14 @@ function mount(app, deps) {
       .filter(Boolean);
   }
 
-  app.get('/feedback', (_req, res) => {
+  // The projected QR is the same for everyone, so those answers stay anonymous.
+  // The follow-up email carries ?e=<address>, which identifies the sender and
+  // lets us see who has not answered yet.
+  app.get('/feedback', (req, res) => {
+    const known = String(req.query.e || '').trim().toLowerCase().slice(0, 160);
+    const match = known ? registrations().find((r) => r.email === known) : null;
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    res.send(form());
+    res.send(form(match ? { email: match.email, name: match.name } : null));
   });
 
   app.post('/api/feedback', (req, res) => {
@@ -47,6 +52,7 @@ function mount(app, deps) {
       next: String(b.next || '').slice(0, 1000),
       name: String(b.name || '').trim().slice(0, 120),
       email: String(b.email || '').trim().toLowerCase().slice(0, 160),
+      via: b.known ? 'email' : 'qr',
     };
     fs.appendFileSync(FILE(), JSON.stringify(entry) + '\n');
     console.log('[feedback]', entry.rating, entry.topic, entry.email || '(anonymous)');
@@ -68,10 +74,28 @@ function mount(app, deps) {
 
     const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-    const comments = rows.filter((r) => r.next).reverse().map((r) => `
-      <div class="c"><p>${esc(r.next)}</p>
-      <span>${esc(r.name || 'Anonymous')}${r.email ? ' &middot; ' + esc(r.email) : ''}
-        &middot; rated ${r.rating}/5</span></div>`).join('');
+    // Match answers to the registration list so a comment carries a company,
+    // and so we can see who attended but has not answered yet.
+    const regs = registrations();
+    const byEmail = new Map(regs.map((r) => [r.email, r]));
+    const answered = new Set(rows.map((r) => r.email).filter(Boolean));
+    const identified = rows.filter((r) => r.email).length;
+
+    const comments = rows.filter((r) => r.next).reverse().map((r) => {
+      const who = byEmail.get(r.email);
+      return `<div class="c"><p>${esc(r.next)}</p>
+      <span>${esc(r.name || 'Anonymous')}${who && who.company ? ' &middot; ' + esc(who.company) : ''}
+        ${r.email ? '&middot; <a href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a>' : ''}
+        &middot; rated ${r.rating}/5</span></div>`;
+    }).join('');
+
+    // Chasing everyone is noise; chasing the ones who came and stayed silent is not.
+    const attended = checkedIn();
+    const silent = regs.filter((r) => attended.has(r.email) && !answered.has(r.email));
+    const silentRows = silent.map((r) => `<div class="s">
+      <div><b>${esc(r.name)}</b> <span>${esc(r.company || '')}</span></div>
+      <a class="ask" href="mailto:${esc(r.email)}?subject=${encodeURIComponent('Your thoughts on Friday?')}">Ask</a>
+    </div>`).join('');
 
     res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Feedback</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -96,6 +120,14 @@ function mount(app, deps) {
     .c p{font-size:15px;line-height:1.5}
     .c span{font-size:12.5px;color:#888;display:block;margin-top:7px}
     .empty{background:#fff;border:1px dashed #d8d2c4;border-radius:12px;padding:34px;text-align:center;color:#666}
+    .hint{font-size:13.5px;color:#666;margin-bottom:10px}
+    .s{background:#fff;border:1px solid #e5e0d5;border-radius:12px;padding:12px 16px;margin-bottom:8px;
+      display:flex;gap:12px;align-items:center;font-size:14px}
+    .s div{flex:1;overflow-wrap:anywhere}
+    .s span{color:#666}
+    .ask{background:#F6BB12;color:#111;text-decoration:none;font-weight:700;font-size:13px;
+      padding:8px 14px;border-radius:8px}
+    .c a{color:#111}
     a{color:#333}</style></head><body>
     <p><a href="/admin?key=${k}">&larr; Back to registrations</a></p>
     <h1>Feedback</h1>
@@ -103,6 +135,7 @@ function mount(app, deps) {
       <div class="card"><div class="n">${rows.length}</div><div class="l">Responses</div></div>
       <div class="card"><div class="n">${avg}</div><div class="l">Average rating</div></div>
       <div class="card"><div class="n">${rows.filter((r) => r.next).length}</div><div class="l">With comments</div></div>
+      <div class="card"><div class="n">${identified}</div><div class="l">Identified</div></div>
     </div>
 
     <h2>Ratings</h2>
@@ -121,11 +154,16 @@ function mount(app, deps) {
 
     <h2>What to cover next time</h2>
     ${comments || '<div class="empty">No written comments yet.</div>'}
+
+    ${silent.length ? `<h2>Attended, no feedback yet (${silent.length})</h2>
+    <p class="hint">These guests checked in but have not answered. The link in a personal
+      email identifies them automatically, so their answer lands attributed.</p>
+    ${silentRows}` : ''}
     </body></html>`);
   });
 }
 
-function form() {
+function form(known) {
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -169,6 +207,8 @@ input{width:100%;padding:11px 12px;border:1px solid #d8d2c4;border-radius:9px;fo
 .ok h3{font-family:'Archivo Black',sans-serif;font-size:22px}
 .ok p{margin-top:10px}
 .small{font-size:13px;color:var(--grey);margin-top:14px;text-align:center}
+.who{background:#F2FBF3;border:1px solid #bfe3c6;border-radius:10px;padding:12px 14px;
+  font-size:14px;text-align:center}
 footer{text-align:center;font-size:13px;color:var(--grey);margin-top:40px}
 </style></head><body>
 <div class="wrap">
@@ -201,13 +241,18 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:40px}
       <textarea id="next" placeholder="A topic, a speaker, a format \u2014 anything."></textarea>
     </div>
 
-    <div class="grid2">
+    ${known ? `<div class="who">Answering as <b>${known.name}</b> &middot; ${known.email}</div>
+    <input type="hidden" id="name" value="${known.name}">
+    <input type="hidden" id="email" value="${known.email}">`
+    : `<div class="grid2">
       <input id="name" placeholder="Your name (optional)" autocomplete="name">
       <input id="email" type="email" placeholder="Email (optional)" autocomplete="email">
-    </div>
+    </div>`}
     <div class="hp"><input id="website" tabindex="-1" autocomplete="off"></div>
 
-    <p class="small">Leave your name if you would like a reply. Otherwise it stays anonymous.</p>
+    <p class="small">${known
+      ? 'We know it is you, so we can follow up on anything you raise.'
+      : 'Leave your name if you would like a reply. Otherwise it stays anonymous.'}</p>
     <button type="button" class="send" id="send">Send feedback</button>
     <div class="err" id="err"></div>
   </form>
@@ -253,6 +298,7 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:40px}
           next: document.getElementById('next').value,
           name: document.getElementById('name').value,
           email: document.getElementById('email').value,
+          known: ${known ? 'true' : 'false'},
           website: document.getElementById('website').value,
         }),
       });
