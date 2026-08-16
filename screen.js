@@ -75,9 +75,13 @@ html,body{height:100%;overflow:hidden}
 body{font-family:Inter,system-ui,sans-serif;background:var(--cream);color:var(--ink);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   padding:4vh 4vw;text-align:center;cursor:none}
-.logos{display:flex;align-items:center;justify-content:center;gap:5vw;margin-bottom:3vh}
-.logos img{height:5vh;width:auto}
-.logos img.c{height:7.5vh}
+/* Equal cells rather than equal gaps: the three logos have very different
+   widths, so spacing them evenly leaves the middle one off-centre. */
+.logos{display:flex;align-items:center;justify-content:center;width:100%;
+  max-width:60vw;margin-bottom:3vh}
+.logos .cell{flex:1;display:flex;justify-content:center;align-items:center}
+.logos img{max-height:5vh;max-width:80%;width:auto}
+.logos img.c{max-height:7.5vh}
 .kicker{font-weight:700;letter-spacing:.35em;font-size:1.7vh;color:var(--grey)}
 h1{font-family:'Archivo Black',sans-serif;font-size:6.5vh;line-height:1.05;margin-top:1.2vh}
 .lead{font-size:2.4vh;color:#333;margin-top:1.6vh;max-width:62ch}
@@ -89,15 +93,16 @@ h1{font-family:'Archivo Black',sans-serif;font-size:6.5vh;line-height:1.05;margi
 .hint{font-size:1.8vh;color:var(--grey);margin-top:1vh}
 /* A phone held up next to the screen should still make sense of it */
 @media(max-aspect-ratio:1/1){
+  .logos{max-width:92vw}
   .qr img{height:44vw;width:44vw}
   h1{font-size:5vh}.lead{font-size:2vh}.url{font-size:2.2vh}
 }
 </style></head><body>
 
 <div class="logos">
-  <img src="/img/elev8.jpg" alt="Elev8 Suite">
-  <img class="c" src="/img/cha.jpg?v=2" alt="Canggu Hospitality Association">
-  <img src="/img/mekari.jpg?v=2" alt="Mekari">
+  <div class="cell"><img src="/img/elev8.jpg" alt="Elev8 Suite"></div>
+  <div class="cell"><img class="c" src="/img/cha.jpg?v=2" alt="Canggu Hospitality Association"></div>
+  <div class="cell"><img src="/img/mekari.jpg?v=2" alt="Mekari"></div>
 </div>
 
 <div class="kicker">${s.kicker}</div>
