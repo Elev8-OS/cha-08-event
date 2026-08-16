@@ -71,6 +71,8 @@ const GHL_TAG_PAID = process.env.GHL_TAG_PAID || (GHL_TAG + ' - Paid');
 const GHL_CF_PROPERTIES = process.env.GHL_CF_PROPERTIES || 'igDIndbcECJUpM96Kk7V'; // Number of Properties
 const GHL_CF_PMS = process.env.GHL_CF_PMS || '3Z3qAyZ0luOBmHeQh2AD';               // Current PMS / Software
 const GHL_CF_PAIN = process.env.GHL_CF_PAIN || 'K2mUif9zM7glvUu64oI9';             // Primary Pain Point
+// GHL user id the registration is assigned to, so replies land with the right person
+const GHL_ASSIGNED_USER = real(process.env.GHL_ASSIGNED_USER);
 
 // --- Payment --------------------------------------------------------------
 // PAYMENT_REQUIRED=false disables the proof-of-payment step entirely.
@@ -156,6 +158,7 @@ async function sendToGHL(entry) {
         phone: entry.phone,
         companyName: entry.company || undefined,
         source: GHL_SOURCE,
+        assignedTo: GHL_ASSIGNED_USER || undefined,
         customFields: ghlCustomFields(entry),
       }),
     });
@@ -501,6 +504,7 @@ app.get('/health', (_req, res) => res.json({
   ok: true,
   ghl: GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'not configured'),
   tag: GHL_TAG,
+  assignedTo: GHL_ASSIGNED_USER || 'not set',
   payment: payment.isEnabled() ? payment.mode() + ' (automatic QRIS)' : (PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via ' + PAYMENT_METHOD + ' (proof required)' : 'disabled'),
   seatPrice: SEAT_PRICE,
 }));
@@ -508,7 +512,7 @@ app.get('/health', (_req, res) => res.json({
 app.listen(PORT, () => {
   const mode = GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'NOT CONFIGURED (still placeholders)');
   console.log(`CHA-08 event page running on :${PORT}`);
-  console.log(`[ghl] mode: ${mode} | tag: "${GHL_TAG}"`);
+  console.log(`[ghl] mode: ${mode} | tag: "${GHL_TAG}" | assigned to: ${GHL_ASSIGNED_USER || 'nobody'}`);
   console.log(`[payment] ${payment.isEnabled()
     ? payment.mode() + ' - automatic QRIS, IDR ' + SEAT_PRICE + ' per seat'
     : (PAYMENT_REQUIRED ? PAYMENT_AMOUNT + ' via ' + PAYMENT_METHOD + ', screenshot required' : 'disabled')}`);
