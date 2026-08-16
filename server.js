@@ -495,7 +495,7 @@ app.post('/api/rsvp', (req, res) => {
     });
   }
   if (duplicate) {
-    return res.json({ ok: true, message: 'You are already registered — see you on the 28th!' });
+    return res.json({ ok: true, message: 'You are already registered \u2014 see you on the 28th!' });
   }
 
   fs.appendFileSync(DB_FILE, JSON.stringify(entry) + '\n');
@@ -670,7 +670,9 @@ app.get('/admin', (req, res) => {
     <a class="btn ghost" href="/admin/resync?key=${k}">Resync</a>
     <a class="btn ghost" href="/admin/badges?key=${k}">Badges</a>
     <a class="btn ghost" href="/admin/feedback?key=${k}">Feedback</a>
-    <a class="btn ghost" href="/screen" target="_blank">Screen QR</a>
+    <a class="btn ghost" href="/admin/questions?key=${k}">Questions</a>
+    <a class="btn ghost" href="/screen/ask" target="_blank">Questions QR</a>
+    <a class="btn ghost" href="/screen" target="_blank">Feedback QR</a>
     <a class="btn ghost" href="/admin/archives?key=${k}">Archive</a>
     <a class="btn danger" href="/admin/reset?key=${k}">Clear\u2026</a>
   </div>
@@ -710,7 +712,7 @@ app.get('/admin', (req, res) => {
     if (!emails.length) return;
     if (!pw) { msg.textContent = 'Enter the reset password.'; return; }
     if (!confirm('Archive ' + emails.length + ' registration(s)? They are moved to an archive folder, not deleted.')) return;
-    this.disabled = true; msg.textContent = 'Archiving\u2026';
+    this.disabled = true; msg.textContent = 'Archiving\\u2026';
     try {
       var r = await fetch('/admin/archive?key=${k}', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -719,7 +721,7 @@ app.get('/admin', (req, res) => {
       var d = await r.json();
       if (d.ok) { location.reload(); return; }
       msg.textContent = d.error || 'Failed.';
-    } catch (e) { msg.textContent = 'Network error \u2014 nothing was changed.'; }
+    } catch (e) { msg.textContent = 'Network error \\u2014 nothing was changed.'; }
     this.disabled = false;
   });
   </script>
@@ -991,7 +993,7 @@ app.post('/admin/reset', (req, res) => {
 
   const moved = [];
   ['registrations.jsonl', 'payments.jsonl', 'pending.jsonl', 'ghl-sync.jsonl',
-    'views.jsonl', 'checkins.jsonl', 'waitlist.jsonl', 'feedback.jsonl'].forEach((f) => {
+    'views.jsonl', 'checkins.jsonl', 'waitlist.jsonl', 'feedback.jsonl', 'questions.jsonl'].forEach((f) => {
     const src = path.join(DATA_DIR, f);
     if (fs.existsSync(src)) { fs.renameSync(src, path.join(archiveDir, f)); moved.push(f); }
   });
