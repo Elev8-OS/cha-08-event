@@ -12,6 +12,7 @@ const ADMIN_KEY = process.env.ADMIN_KEY || '';
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 app.use(express.json({ limit: '9mb' }));
+app.use(express.urlencoded({ extended: false }));
 // Never let a browser hold on to a stale page: content changes right up to the event
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, filePath) => {
@@ -73,6 +74,9 @@ const GHL_CF_PMS = process.env.GHL_CF_PMS || '3Z3qAyZ0luOBmHeQh2AD';            
 const GHL_CF_PAIN = process.env.GHL_CF_PAIN || 'K2mUif9zM7glvUu64oI9';             // Primary Pain Point
 // GHL user id the registration is assigned to, so replies land with the right person
 const GHL_ASSIGNED_USER = real(process.env.GHL_ASSIGNED_USER);
+
+// Second factor for clearing data. Without it, the reset is unavailable.
+const RESET_PASSWORD = real(process.env.RESET_PASSWORD);
 
 // --- Payment --------------------------------------------------------------
 // PAYMENT_REQUIRED=false disables the proof-of-payment step entirely.
@@ -483,19 +487,39 @@ app.get('/api/payment/status', async (req, res) => {
 
 // Clear all registration data. Nothing is deleted: files and proof images are
 // moved into a timestamped archive folder inside DATA_DIR, so a mistake is
-// always recoverable. Requires an explicit confirm=YES to avoid accidents.
+// always recoverable. Needs the admin key AND the reset password, and the
+// password travels by POST so it never lands in a URL, log or browser history.
+function resetPage(k, error) {
+  return '<!doctype html><meta charset="utf-8"><title>Clear all data</title>'
+    + '<body style="font-family:system-ui;padding:32px;background:#F7F4EE;max-width:560px">'
+    + '<h2 style="margin-bottom:6px">Clear all registration data?</h2>'
+    + '<p style="color:#444;line-height:1.5">This moves every registration, payment record and payment '
+    + 'screenshot into an archive folder. The list will be empty afterwards. Nothing is permanently deleted.</p>'
+    + (error ? `<p style="color:#a33;font-weight:600">${error}</p>` : '')
+    + `<form method="POST" action="/admin/reset?key=${k}" style="margin-top:18px">`
+    + '<label style="display:block;font-weight:600;font-size:14px;margin-bottom:6px">Reset password</label>'
+    + '<input type="password" name="password" autocomplete="off" autofocus '
+    + 'style="width:100%;padding:11px 12px;border:1px solid #d8d2c4;border-radius:9px;font-size:15px;background:#fff">'
+    + '<div style="margin-top:16px;display:flex;gap:12px;align-items:center">'
+    + '<button type="submit" style="background:#a33;color:#fff;border:0;border-radius:8px;padding:12px 20px;'
+    + 'font-size:15px;font-weight:600;cursor:pointer">Clear all data</button>'
+    + `<a href="/admin?key=${k}" style="color:#555">Cancel</a></div></form></body>`;
+}
+
 app.get('/admin/reset', (req, res) => {
   if (!guard(req, res)) return;
-  if (req.query.confirm !== 'YES') {
-    return res.status(400).send(
-      '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:32px;background:#F7F4EE">'
-      + '<h2>Clear all registration data?</h2>'
-      + '<p>This moves every registration, payment record and payment screenshot into an archive folder. '
-      + 'The admin list will be empty afterwards. Nothing is permanently deleted.</p>'
-      + `<p><a href="/admin/reset?key=${encodeURIComponent(req.query.key)}&confirm=YES" `
-      + 'style="display:inline-block;background:#111;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none">'
-      + 'Yes, clear the data</a>'
-      + `&nbsp;&nbsp;<a href="/admin?key=${encodeURIComponent(req.query.key)}">Cancel</a></p></body>`);
+  res.send(resetPage(encodeURIComponent(req.query.key), ''));
+});
+
+app.post('/admin/reset', (req, res) => {
+  if (!guard(req, res)) return;
+  const k = encodeURIComponent(req.query.key);
+  if (!RESET_PASSWORD) {
+    return res.status(500).send(resetPage(k, 'No reset password is configured. Set RESET_PASSWORD first.'));
+  }
+  if (String((req.body || {}).password || '') !== RESET_PASSWORD) {
+    console.error('[admin] reset attempt with wrong password');
+    return res.status(403).send(resetPage(k, 'Wrong password.'));
   }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -519,11 +543,10 @@ app.get('/admin/reset', (req, res) => {
   }
 
   console.log('[admin] data cleared, archived to', archive, '| files:', moved.join(','), '| proofs:', proofs);
-  res.send(
-    '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:32px;background:#F7F4EE">'
+  res.send('<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:32px;background:#F7F4EE">'
     + '<h2>Done \u2014 the list is empty.</h2>'
-    + `<p>Archived ${moved.length} data file(s) and ${proofs} payment screenshot(s) to <code>${archive}</code>.</p>`
-    + `<p><a href="/admin?key=${encodeURIComponent(req.query.key)}">Back to registrations</a></p></body>`);
+    + `<p>Archived ${moved.length} data file(s) and ${proofs} payment screenshot(s).</p>`
+    + `<p><a href="/admin?key=${k}">Back to registrations</a></p></body>`);
 });
 
 // Serve a payment screenshot (admin only - these contain personal data)
