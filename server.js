@@ -8,6 +8,7 @@ const archive = require('./archive');
 const slides = require('./slides');
 const badges = require('./badges');
 const feedback = require('./feedback');
+const screen = require('./screen');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -634,6 +635,7 @@ app.get('/admin', (req, res) => {
     <a class="btn ghost" href="/admin/resync?key=${k}">Resync</a>
     <a class="btn ghost" href="/admin/badges?key=${k}">Badges</a>
     <a class="btn ghost" href="/admin/feedback?key=${k}">Feedback</a>
+    <a class="btn ghost" href="/screen" target="_blank">Screen QR</a>
     <a class="btn ghost" href="/admin/archives?key=${k}">Archive</a>
     <a class="btn danger" href="/admin/reset?key=${k}">Clear\u2026</a>
   </div>
@@ -691,7 +693,6 @@ app.get('/admin', (req, res) => {
 
 app.get('/admin.csv', (req, res) => {
   if (!guard(req, res)) return;
-  const rows = readAll();
   const csvEsc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
   const paid = paidSet();
   const csv = ['ts,name,email,phone,company,role,properties,employees,pms,pain_point,seats,amount_idr,paid,walkin,proof_file,order_id']
@@ -1019,19 +1020,17 @@ function addWalkin(entry) {
   fs.appendFileSync(path.join(DATA_DIR, 'payments.jsonl'),
     JSON.stringify({ ts: entry.ts, email: entry.email, paid: true, walkin: true }) + '\n');
 
-  if (!entry.email.endsWith('@cha-08.local')) {
-    sendToGHL(entry)
-      .then(async (mode) => {
-        if (mode === 'disabled') return;
-        logSync(entry.email, 'sent', mode);
-        if (GHL_API_TOKEN && GHL_LOCATION_ID) {
-          for (const t of [GHL_TAG_WALKIN, GHL_TAG_ATTENDED, GHL_TAG_PAID]) {
-            try { await addGhlTag(entry, t); } catch (e) { console.error('[ghl] walk-in tag failed', e.message); }
-          }
+  sendToGHL(entry)
+    .then(async (mode) => {
+      if (mode === 'disabled') return;
+      logSync(entry.email, 'sent', mode);
+      if (GHL_API_TOKEN && GHL_LOCATION_ID) {
+        for (const t of [GHL_TAG_WALKIN, GHL_TAG_ATTENDED, GHL_TAG_PAID]) {
+          try { await addGhlTag(entry, t); } catch (e) { console.error('[ghl] walk-in tag failed', e.message); }
         }
-      })
-      .catch((e) => { console.error('[ghl] walk-in sync failed', e.message); logSync(entry.email, 'failed', e.message); });
-  }
+      }
+    })
+    .catch((e) => { console.error('[ghl] walk-in sync failed', e.message); logSync(entry.email, 'failed', e.message); });
 }
 
 // Reception check-in (tablet interface at the door)
@@ -1044,6 +1043,7 @@ checkin.mount(app, {
 slides.mount(app);
 badges.mount(app, { guard, readAll, paidSet });
 feedback.mount(app, { DATA_DIR, guard });
+screen.mount(app);
 
 app.get('/health', (_req, res) => res.json({
   ok: true,
