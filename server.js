@@ -395,9 +395,18 @@ app.get('/admin', (req, res) => {
   res.send(`<!doctype html><meta charset="utf-8"><title>Registrations (${rows.length})</title>
   <style>body{font-family:system-ui;padding:24px;background:#F7F4EE}h1{font-size:20px}
   table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid #ddd;padding:6px 10px;font-size:14px;text-align:left}
-  a{display:inline-block;margin-bottom:12px}</style>
+  .bar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .btn{display:inline-block;padding:8px 14px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none}
+  .btn.primary{background:#111;color:#fff}
+  .btn.ghost{background:#fff;color:#333;border:1px solid #ddd}
+  .btn.danger{background:#fff;color:#a33;border:1px solid #e3bcbc;margin-left:auto}
+  .btn.danger:hover{background:#fdf3f3}</style>
   <h1>Registrations: ${rows.length} &middot; ${seats} seats &middot; paid: ${rows.filter((r) => paid.get(r.email) === true).length} &middot; total: ${money(totalDue)}</h1>
-  <a href="/admin.csv?key=${encodeURIComponent(req.query.key)}">Download CSV</a>
+  <div class="bar">
+    <a class="btn primary" href="/admin.csv?key=${k}">Download CSV</a>
+    <a class="btn ghost" href="/admin/resync?key=${k}">Resync to GHL</a>
+    <a class="btn danger" href="/admin/reset?key=${k}">Clear all data…</a>
+  </div>
   <table><tr><th>Time (UTC)</th><th>Name</th><th>Email</th><th>Phone/WA</th><th>Property/Company</th><th>Role</th><th>Properties</th><th>Employees</th><th>PMS</th><th>Pain point</th><th>Seats</th><th>Amount</th><th>Proof</th><th>Payment</th></tr>${tr}</table>`);
 });
 
