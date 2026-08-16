@@ -17,10 +17,14 @@ const CHANGELOG = [
       'Header counts seats throughout: a complimentary booking of two seats '
         + 'was showing as one.',
       'Duplicate questions are caught while typing, with the option to back the '
-        + 'existing one instead of asking it twice.',
+        + 'existing one instead of asking it twice. A single keyword is enough: '
+        + 'typing "APOA" finds the APOA question.',
+      'The word splitter behind that check was breaking on the letter s, so it '
+        + 'found nothing at all on a phone.',
       'The registration screen showed the domain with a doubled last letter.',
       'Admin buttons grouped by when you need them: on the day, on the screen, '
         + 'afterwards, data.',
+      'Moderator view rebuilt as tiles, with the most backed question highlighted.',
     ],
   },
   {
