@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 
 function mount(app, deps) {
-  const { DATA_DIR, guard, readAll, paidSet, addGhlTag, ATTENDED_TAG, ghlReady, addWalkin } = deps;
+  const { DATA_DIR, guard, readAll, paidSet, compSet, addGhlTag, ATTENDED_TAG, ghlReady, addWalkin } = deps;
   const FILE = () => path.join(DATA_DIR, 'checkins.jsonl');
 
   // Latest entry per email wins, so an accidental check-in can be undone
@@ -27,6 +27,7 @@ function mount(app, deps) {
   app.get('/checkin/list', (req, res) => {
     if (!guard(req, res)) return;
     const paid = paidSet();
+    const comps = compSet();
     const arrived = arrivedSet();
     const guests = readAll().map((r) => {
       const a = arrived.get(r.email);
@@ -36,6 +37,7 @@ function mount(app, deps) {
         company: r.company || '',
         seats: r.guests || 1,
         paid: paid.get(r.email) === true,
+        comp: comps.has(r.email),
         walkin: Boolean(r.walkin),
         arrived: Boolean(a && a.arrived),
         at: a && a.arrived ? a.ts.slice(11, 16) : '',
@@ -163,6 +165,7 @@ header img{height:34px} header img.c{height:50px}
 .g .seats{font-size:12px;font-weight:700;background:#F2EEE5;border-radius:20px;padding:3px 10px;display:inline-block;margin-top:5px}
 .g .unpaid{background:#FDF0E6;color:#8a5a1f}
 .g .walkin{background:#E8F0FB;color:#2c5282;margin-left:5px}
+.g .guest{background:#EDF2FB;color:#2c5282}
 .mark{width:52px;height:52px;border-radius:50%;border:2px solid #ddd;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;font-size:24px;color:#bbb;background:#fff}
 .g.in .mark{background:var(--green);border-color:var(--green);color:#fff}
@@ -262,8 +265,8 @@ function render() {
     return '<div class="g' + (g.arrived ? ' in' : '') + '" data-email="' + esc(g.email) + '">'
       + '<div class="info"><div class="nm">' + esc(g.name) + '</div>'
       + '<div class="meta">' + esc(g.company || g.email) + '</div>'
-      + '<span class="seats' + (g.paid ? '' : ' unpaid') + '">' + g.seats + ' seat' + (g.seats > 1 ? 's' : '')
-      + (g.paid ? '' : ' \\u00b7 unpaid') + (g.arrived ? ' \\u00b7 ' + g.at : '') + '</span>'
+      + '<span class="seats' + (g.comp ? ' guest' : (g.paid ? '' : ' unpaid')) + '">' + g.seats + ' seat' + (g.seats > 1 ? 's' : '')
+      + (g.comp ? ' \\u00b7 guest' : (g.paid ? '' : ' \\u00b7 unpaid')) + (g.arrived ? ' \\u00b7 ' + g.at : '') + '</span>'
       + (g.walkin ? '<span class="seats walkin">walk-in</span>' : '') + '</div>'
       + '<div class="mark">' + (g.arrived ? '\\u2713' : '') + '</div></div>';
   }).join('');
