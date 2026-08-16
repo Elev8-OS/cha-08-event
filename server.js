@@ -1042,7 +1042,21 @@ checkin.mount(app, {
 
 slides.mount(app);
 badges.mount(app, { guard, readAll, paidSet });
-feedback.mount(app, { DATA_DIR, guard });
+feedback.mount(app, {
+  DATA_DIR, guard,
+  registrations: readAll,
+  // Everyone marked arrived at the desk - the only people worth chasing
+  checkedIn: () => {
+    const f = path.join(DATA_DIR, 'checkins.jsonl');
+    const m = new Map();
+    if (fs.existsSync(f)) {
+      fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).forEach((l) => {
+        try { const r = JSON.parse(l); m.set(r.email, r.arrived); } catch {}
+      });
+    }
+    return new Set([...m.entries()].filter(([, v]) => v).map(([e]) => e));
+  },
+});
 screen.mount(app);
 
 app.get('/health', (_req, res) => res.json({
