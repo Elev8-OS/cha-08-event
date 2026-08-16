@@ -22,7 +22,9 @@ const SCREENS = {
     path: '/ask',
     kicker: 'COFFEE BREAK',
     title: 'ASK ANYTHING',
-    lead: 'Type the question you did not want to ask out loud. We take them from the front afterwards.',
+    // Say the backing rule here, or everyone types a new question instead of
+    // supporting one that is already on the list.
+    lead: 'Type the question you did not want to ask out loud \u2014 or back one that is already there. The most backed questions get answered first.',
     img: '/img/qrask.png',
   },
   register: {
