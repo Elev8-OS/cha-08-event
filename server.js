@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const payment = require('./payment');
 const checkin = require('./checkin');
+const archive = require('./archive');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -552,6 +553,7 @@ app.get('/admin', (req, res) => {
     <a class="btn ghost" href="/admin/stats?key=${k}">Visitor stats</a>
     <a class="btn ghost" href="/admin.csv?key=${k}">CSV</a>
     <a class="btn ghost" href="/admin/resync?key=${k}">Resync</a>
+    <a class="btn ghost" href="/admin/archives?key=${k}">Archive</a>
     <a class="btn danger" href="/admin/reset?key=${k}">Clear\u2026</a>
   </div>
   ${rows.length ? `<div class="grid">${cards}</div>` : '<div class="empty">No registrations yet.</div>'}
@@ -775,8 +777,8 @@ app.post('/admin/archive', (req, res) => {
   if (!wanted.size) return res.status(400).json({ ok: false, error: 'Nothing selected.' });
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const archive = path.join(DATA_DIR, 'archive-selected-' + stamp);
-  fs.mkdirSync(archive, { recursive: true });
+  const archiveDir = path.join(DATA_DIR, 'archive-selected-' + stamp);
+  fs.mkdirSync(archiveDir, { recursive: true });
 
   // Split a jsonl file into kept and removed lines, writing atomically so a
   // request arriving mid-rewrite cannot read a half-written file.
@@ -790,7 +792,7 @@ app.post('/admin/archive', (req, res) => {
       (wanted.has(email) ? gone : kept).push(l);
     });
     if (gone.length) {
-      fs.writeFileSync(path.join(archive, fileName), gone.join('\n') + '\n');
+      fs.writeFileSync(path.join(archiveDir, fileName), gone.join('\n') + '\n');
       const tmp = src + '.tmp';
       fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '');
       fs.renameSync(tmp, src);
@@ -809,7 +811,7 @@ app.post('/admin/archive', (req, res) => {
 
   let movedProofs = 0;
   if (proofs.length) {
-    const dest = path.join(archive, 'proofs');
+    const dest = path.join(archiveDir, 'proofs');
     fs.mkdirSync(dest, { recursive: true });
     proofs.forEach((f) => {
       const src = path.join(PROOF_DIR, f);
@@ -817,8 +819,8 @@ app.post('/admin/archive', (req, res) => {
     });
   }
 
-  console.log('[admin] archived', removed, 'registration(s) to', archive, '| proofs:', movedProofs);
-  res.json({ ok: true, archived: removed, folder: path.basename(archive) });
+  console.log('[admin] archived', removed, 'registration(s) to', archiveDir, '| proofs:', movedProofs);
+  res.json({ ok: true, archived: removed, folder: path.basename(archiveDir) });
 });
 
 // Clear all registration data. Nothing is deleted: files and proof images are
@@ -862,18 +864,18 @@ app.post('/admin/reset', (req, res) => {
   }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const archive = path.join(DATA_DIR, 'archive-' + stamp);
-  fs.mkdirSync(archive, { recursive: true });
+  const archiveDir = path.join(DATA_DIR, 'archive-' + stamp);
+  fs.mkdirSync(archiveDir, { recursive: true });
 
   const moved = [];
   ['registrations.jsonl', 'payments.jsonl', 'pending.jsonl', 'ghl-sync.jsonl', 'views.jsonl', 'checkins.jsonl'].forEach((f) => {
     const src = path.join(DATA_DIR, f);
-    if (fs.existsSync(src)) { fs.renameSync(src, path.join(archive, f)); moved.push(f); }
+    if (fs.existsSync(src)) { fs.renameSync(src, path.join(archiveDir, f)); moved.push(f); }
   });
 
   let proofs = 0;
   if (fs.existsSync(PROOF_DIR)) {
-    const dest = path.join(archive, 'proofs');
+    const dest = path.join(archiveDir, 'proofs');
     fs.mkdirSync(dest, { recursive: true });
     fs.readdirSync(PROOF_DIR).forEach((f) => {
       fs.renameSync(path.join(PROOF_DIR, f), path.join(dest, f));
@@ -881,12 +883,13 @@ app.post('/admin/reset', (req, res) => {
     });
   }
 
-  console.log('[admin] data cleared, archived to', archive, '| files:', moved.join(','), '| proofs:', proofs);
+  console.log('[admin] data cleared, archived to', archiveDir, '| files:', moved.join(','), '| proofs:', proofs);
   res.send('<!doctype html><html lang="en"><head><meta charset="utf-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1"></head>'
     + '<body style="font-family:system-ui;padding:24px;background:#F7F4EE">'
     + '<h2>Done \u2014 the list is empty.</h2>'
-    + `<p>Archived ${moved.length} data file(s) and ${proofs} payment screenshot(s).</p>`
+    + `<p>Archived ${moved.length} data file(s) and ${proofs} payment screenshot(s). `
+    + 'Everything can be restored from the archive.</p>'
     + `<p><a href="/admin?key=${k}">Back to registrations</a></p></body></html>`);
 });
 
@@ -916,6 +919,12 @@ app.get('/admin/verify', async (req, res) => {
     try { await addGhlTag(entry, GHL_TAG_PAID); } catch (e) { console.error('[ghl] paid tag failed', e.message); }
   }
   res.redirect('/admin?key=' + encodeURIComponent(req.query.key));
+});
+
+// Archive browser with per-entry restore
+archive.mount(app, {
+  DATA_DIR, guard, PROOF_DIR, SEAT_PRICE,
+  RESET_PASSWORD: () => RESET_PASSWORD,
 });
 
 // Reception check-in (tablet interface at the door)
