@@ -61,6 +61,9 @@ h2{font-family:'Archivo Black',sans-serif;text-align:center;font-size:clamp(22px
 .when{font-family:'Archivo Black',sans-serif;text-align:center;font-size:clamp(24px,5vw,36px);margin-top:64px}
 .when .l2{font-size:clamp(17px,3.5vw,24px);display:block;margin-top:6px}
 .foot-note{text-align:center;font-size:14.5px;color:#333;margin-top:10px}
+.seatbar{display:none;text-align:center;margin-top:14px;font-weight:700;font-size:15px}
+.seatbar.low{color:#a3661f}
+.seatbar.full{color:#a33}
 form{background:#fff;border:1px solid #e5e0d5;border-radius:16px;padding:30px;margin-top:30px;box-shadow:0 6px 24px rgba(0,0,0,.05)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:640px){.grid{grid-template-columns:1fr}}
@@ -179,7 +182,8 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
   </div>
 
   <div class="when">FRIDAY, 28 AUGUST 2026<span class="l2">OXO THE FACTORY &nbsp;·&nbsp; 1.30 PM ONWARDS</span></div>
-  <div class="foot-note"><b>Seats are limited.</b> Participation fee: <b>IDR 50,000</b> per person. Open to hosts, GMs, and operators across Bali.</div>
+  <div class="foot-note"><b>Seats are limited to 70.</b> Participation fee: <b>IDR 50,000</b> per person. Open to hosts, GMs, and operators across Bali.</div>
+  <div class="seatbar" id="seatbar"></div>
 
   <h2 id="register">SECURE YOUR SEAT</h2>
   <form id="rsvp" novalidate>
@@ -285,6 +289,14 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
     <span class="backlink" id="back">&larr; Back to my details</span>
   </div>
 
+  <div class="success" id="waitok">
+    <h3>YOU'RE ON THE LIST.</h3>
+    <p>The room is full at 70 seats — so we have put you on the waitlist instead.<br><br>
+    <b>Nothing has been charged.</b> If a seat frees up we will contact you straight away,
+    and you are first in line when we announce the next one.<br>
+    <span style="font-size:13.5px;color:var(--grey)">We will be in touch either way before 28 August.</span></p>
+  </div>
+
   <div class="success" id="ok">
     <h3>YOU'RE IN.</h3>
     <p>Your seat is confirmed &mdash; no further confirmation needed.<br><br>
@@ -296,6 +308,8 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
       <span class="hd">We have sent your confirmation to <span id="conf-email">your email address</span></span>
       <p style="font-size:14.5px;color:#444">Depending on your provider and settings, it may land in <b>Spam</b> or, in Gmail, under the <b>Promotions</b> tab. If you find it there, mark it as <b>&ldquo;Not spam&rdquo;</b> &mdash; or simply reply with a short &ldquo;received&rdquo;.</p>
       <p style="font-size:14px;color:var(--grey);margin-top:10px">This matters: we'll send the address, parking details and timing the day before the event.</p>
+      <p style="font-size:14px;color:var(--grey);margin-top:10px">Slides and resources will be published at
+        <a href="/slides" style="color:#111">cha-08.elev8-suite.com/slides</a> after the event.</p>
     </div>
   </div>
 
@@ -364,6 +378,37 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
     }, 3000);
   }
 
+  // Honest availability, fetched on load and refreshed before checkout
+  var seatsLeft = null;
+  async function refreshSeats() {
+    try {
+      var r = await fetch('/api/seats', { cache: 'no-store' });
+      var s = await r.json();
+      seatsLeft = s.left;
+      var el = document.getElementById('seatbar');
+      el.className = 'seatbar';
+      if (s.full) {
+        el.textContent = 'All 70 seats are taken \u2014 join the waitlist below.';
+        el.classList.add('full');
+      } else if (s.left <= 15) {
+        el.textContent = 'Only ' + s.left + ' seat' + (s.left > 1 ? 's' : '') + ' left.';
+        el.classList.add('low');
+      } else {
+        el.textContent = s.left + ' of 70 seats still available.';
+      }
+      el.style.display = 'block';
+    } catch (e) { /* never block the form on this */ }
+  }
+  refreshSeats();
+
+  function showWaitlist() {
+    if (poller) clearInterval(poller);
+    form.style.display = 'none';
+    step2.style.display = 'none';
+    document.getElementById('waitok').style.display = 'block';
+    document.getElementById('waitok').scrollIntoView({ behavior: 'smooth' });
+  }
+
   document.getElementById('btn-next').addEventListener('click', async function () {
     hide(err);
     details = collect();
@@ -390,6 +435,7 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(details)
       });
       var j = await r.json();
+      if (j.ok && j.mode === 'waitlist') { showWaitlist(); btn.disabled = false; return; }
       if (j.ok && j.mode === 'qris') startAutoPayment(j);
     } catch (e) { /* manual flow stays visible */ }
     btn.disabled = false;
@@ -449,6 +495,7 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:70px}
         body: JSON.stringify(Object.assign({}, details, { proof: proofData }))
       });
       var j = await r.json();
+      if (j.ok && j.mode === 'waitlist') { showWaitlist(); return; }
       if (!j.ok) throw new Error(j.error || 'Something went wrong.');
       succeed();
     } catch (ex) {
