@@ -48,6 +48,10 @@ const SESSIONS = [
 
 const decks = require('./decks');
 
+// Andika's WhatsApp, the same number that signs every email. Keep it here
+// rather than inline: it appears on the page and would otherwise drift.
+const WHATSAPP = process.env.WHATSAPP_NUMBER || '6287884834521';
+
 function mount(app) {
   // Deck management belongs with the page it feeds
   decks.mount(app, { sessions: () => SESSIONS });
@@ -130,7 +134,7 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:44px}
     <b>Your free revenue strategy analysis</b><br>
     Every registration includes an analysis of your property worth IDR 2.5 million.
     If we have not scheduled yours yet, let us know.
-    <br><a href="https://wa.me/6281138407888">Message us on WhatsApp</a>
+    <br><a href="https://wa.me/${WHATSAPP}">Message Andika on WhatsApp</a>
   </div>
 
   <footer>An Elev8 Suite event with the Canggu Hospitality Association and Mekari &middot; Bali, Indonesia</footer>
