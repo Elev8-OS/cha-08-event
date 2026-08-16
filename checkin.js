@@ -113,11 +113,11 @@ function page(k) {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Check-in &middot; Smarter Revenue, Better Tech</title>
-<meta name="theme-color" content="#111111">
+<meta name="theme-color" content="#ffffff">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="CHA-08 Check-in">
 <link rel="apple-touch-icon" href="/img/appicon.png">
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -129,7 +129,7 @@ body{font-family:Inter,system-ui,sans-serif;background:var(--cream);color:var(--
 header{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid #e5e0d5;
   padding:14px 22px;display:flex;align-items:center;gap:22px;flex-wrap:wrap}
 header img{height:34px} header img.c{height:50px}
-.title{font-family:'Archivo Black',sans-serif;font-size:17px;line-height:1.2}
+.title{font-family:'Archivo Black',sans-serif;font-size:17px;line-height:1.2;min-width:0}
 .title span{display:block;font-family:Inter,sans-serif;font-weight:500;font-size:12.5px;color:var(--grey)}
 .back{margin-left:auto;color:var(--grey);text-decoration:none;font-size:14px;font-weight:600;
   padding:8px 12px;border:1px solid #e0dace;border-radius:8px;background:#fff}
@@ -182,8 +182,18 @@ header img{height:34px} header img.c{height:50px}
 .toast.show{transform:translateX(-50%) translateY(0)}
 .toast button{background:none;border:0;color:var(--gold);font:inherit;font-weight:700;cursor:pointer}
 @media(max-width:640px){.list{grid-template-columns:1fr;padding:8px 14px 40px}
-  .search{padding:12px 14px 6px}header{padding:12px 14px;gap:12px}header img{height:24px}header img.c{height:34px}
-  .title{font-size:15px;width:100%;order:5}.back{order:3}.count{order:4;margin-left:0}}
+  .search{padding:12px 14px 6px}
+  header{padding:10px 14px 12px;gap:10px}
+  header img{height:22px}header img.c{height:30px}
+  .back{order:3;margin-left:auto;padding:6px 10px;font-size:13px}
+  .title{order:4;flex:1 1 auto;min-width:0;font-size:15px;margin-top:2px}
+  .title span{font-size:12px}
+  .count{order:5;margin-left:auto;margin-top:2px;flex-shrink:0}
+  .count .n{font-size:22px}.count .l{font-size:10.5px}
+  .fab{right:16px;bottom:16px;padding:15px 22px}}
+/* A browser toolbar would sit right on top of the walk-in button */
+body.browser .fab{bottom:calc(84px + env(safe-area-inset-bottom))}
+body.browser .toast{bottom:calc(90px + env(safe-area-inset-bottom))}
 </style></head><body>
 
 <header>
@@ -223,6 +233,11 @@ header img{height:34px} header img.c{height:50px}
 
 <script>
 var KEY = '${k}';
+// Home-screen apps have no browser toolbar; everything else does, and it
+// would sit right on top of the walk-in button.
+if (!(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches)) {
+  document.body.classList.add('browser');
+}
 var guests = [], lastUndo = null, toastTimer = null;
 
 function esc(s){ return String(s||'').replace(/[<>&]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;'}[c]; }); }
