@@ -275,13 +275,15 @@ function adminPage(k, questions) {
   const open = questions.filter((q) => !q.done);
   const done = questions.filter((q) => q.done);
 
-  const card = (q) => `<div class="q${q.done ? ' done' : ''}" data-id="${q.id}">
-      <div class="v">${q.votes}<span>backing</span></div>
-      <div class="t"><p>${esc(q.text)}</p>
-        <span class="meta">${esc(q.session || 'General')}${q.name ? ' &middot; ' + esc(q.name) : ' &middot; anonymous'}
-          &middot; ${esc(q.ts.slice(11, 16))}</span></div>
-      <button class="mark">${q.done ? 'Undo' : 'Answered'}</button>
-    </div>`;
+  // Tiles rather than rows: a moderator reads this on a phone while standing
+  // at the front, and the question itself has to be the biggest thing on it.
+  const card = (q, top) => `<article class="q${q.done ? ' done' : ''}${top ? ' top' : ''}" data-id="${q.id}">
+      <header><span class="v">${q.votes}<small>backing</small></span>
+        <span class="meta">${esc(q.session || 'General')}</span></header>
+      <p>${esc(q.text)}</p>
+      <footer><span class="who">${q.name ? esc(q.name) : 'anonymous'} &middot; ${esc(q.ts.slice(11, 16))}</span>
+        <button class="mark">${q.done ? 'Undo' : 'Answered'}</button></footer>
+    </article>`;
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Questions (${open.length})</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -293,29 +295,40 @@ function adminPage(k, questions) {
     padding-bottom:calc(30px + env(safe-area-inset-bottom))}
   h1{font-size:20px;margin:6px 0 4px}
   .lead{color:#666;font-size:14px;margin-bottom:16px}
-  h2{font-size:15px;margin:24px 0 10px;color:#666}
-  .q{background:#fff;border:1px solid #e5e0d5;border-radius:14px;padding:14px 16px;margin-bottom:10px;
-    display:flex;gap:14px;align-items:flex-start}
+  h2{font-size:15px;margin:26px 0 10px;color:#666}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+  .q{background:#fff;border:1px solid #e5e0d5;border-radius:14px;padding:15px 17px;
+    display:flex;flex-direction:column}
   .q.done{opacity:.5}
-  .v{flex-shrink:0;background:#111;color:#fff;border-radius:10px;padding:8px 12px;text-align:center;
-    font-weight:700;font-size:18px;line-height:1.1;min-width:56px}
-  .v span{display:block;font-size:9.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:#bbb}
-  .t{flex:1;min-width:0}
-  .t p{font-size:16px;line-height:1.45;overflow-wrap:anywhere}
-  .meta{display:block;font-size:12.5px;color:#999;margin-top:6px}
-  .mark{flex-shrink:0;background:#fff;border:1px solid #ddd;border-radius:9px;padding:9px 13px;
+  .q header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .v{background:#111;color:#fff;border-radius:9px;padding:6px 11px;text-align:center;
+    font-weight:700;font-size:17px;line-height:1.05;flex-shrink:0}
+  .v small{display:block;font-size:9px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:#bbb}
+  .q.top .v{background:#F6BB12;color:#111}
+  .q.top .v small{color:#7a5b00}
+  .meta{font-size:12.5px;font-weight:600;color:#8A6D2F;overflow-wrap:anywhere}
+  .q p{font-size:16.5px;line-height:1.4;overflow-wrap:anywhere;flex:1}
+  .q footer{display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:11px;
+    border-top:1px solid #eee7db}
+  .who{font-size:12.5px;color:#999;flex:1;overflow-wrap:anywhere}
+  .mark{flex-shrink:0;background:#fff;border:1px solid #ddd;border-radius:9px;padding:9px 14px;
     font:inherit;font-weight:600;font-size:13.5px;cursor:pointer}
   .empty{background:#fff;border:1px dashed #d8d2c4;border-radius:14px;padding:36px;text-align:center;color:#666}
   a{color:#333}
-  @media(max-width:600px){body{padding:14px}.t p{font-size:15px}}
+  @media(max-width:600px){body{padding:14px}
+    .grid{grid-template-columns:1fr;gap:10px}
+    .q p{font-size:16px}
+    .mark{padding:11px 16px;font-size:14px}}
   </style></head><body>
   <p><a href="/admin?key=${k}">&larr; Back to registrations</a> &middot;
      <a href="/screen/ask" target="_blank">Put the QR on screen</a></p>
   <h1>Questions from the room</h1>
   <p class="lead">Sorted by how many people backed each one. Tap <b>Answered</b> when you
     have dealt with it, and it drops out of the audience's list too.</p>
-  ${open.length ? open.map(card).join('') : '<div class="empty">No questions yet.</div>'}
-  ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join('')}` : ''}
+  ${open.length
+    ? `<div class="grid">${open.map((q, i) => card(q, i === 0 && q.votes > 0)).join('')}</div>`
+    : '<div class="empty">No questions yet.</div>'}
+  ${done.length ? `<h2>Answered (${done.length})</h2><div class="grid">${done.map((q) => card(q)).join('')}</div>` : ''}
 
   <script>
   document.addEventListener('click', async function (e) {
