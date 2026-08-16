@@ -77,12 +77,23 @@ function mount(app, deps) {
     const name = String(b.name || '').trim().slice(0, 120);
     if (!name) return res.status(400).json({ ok: false, error: 'Name is required.' });
 
+    // Email and WhatsApp are required: without them the walk-in never reaches
+    // GHL, so no slides, no follow-up, no revenue analysis - they would simply
+    // vanish from every list the day after.
     const email = String(b.email || '').trim().toLowerCase().slice(0, 160);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return res.status(400).json({ ok: false, error: 'A valid email is required.' });
+    }
+    const phone = String(b.phone || '').trim().slice(0, 40);
+    if (phone.length < 6) {
+      return res.status(400).json({ ok: false, error: 'A WhatsApp number is required.' });
+    }
+
     const entry = {
       ts: new Date().toISOString(),
       name,
-      email: email || ('walkin-' + Date.now() + '@cha-08.local'),
-      phone: String(b.phone || '').trim().slice(0, 40),
+      email,
+      phone,
       company: String(b.company || '').trim().slice(0, 160),
       guests: Math.min(Math.max(parseInt(b.seats, 10) || 1, 1), 10),
       role: '', properties: '', employees: '', pms: '', pain: '',
@@ -213,11 +224,11 @@ body.browser .toast{bottom:calc(90px + env(safe-area-inset-bottom))}
 <div class="sheet" id="sheet">
   <div class="card">
     <h2>Add a walk-in</h2>
-    <p>They are not on the list. This registers them and marks them as arrived.</p>
+    <p>They are not on the list. This registers them and marks them as arrived. Email and WhatsApp are needed so they get the slides and follow-up.</p>
     <input id="w-name" placeholder="Full name *" autocomplete="off">
     <input id="w-company" placeholder="Property / company" autocomplete="off">
-    <input id="w-phone" placeholder="WhatsApp number" inputmode="tel" autocomplete="off">
-    <input id="w-email" placeholder="Email" inputmode="email" autocomplete="off">
+    <input id="w-phone" placeholder="WhatsApp number *" inputmode="tel" autocomplete="off">
+    <input id="w-email" placeholder="Email *" inputmode="email" autocomplete="off">
     <label class="seats-l">Seats
       <select id="w-seats"><option>1</option><option>2</option><option>3</option><option>4</option></select>
     </label>
@@ -334,8 +345,21 @@ sheet.addEventListener('click', function (e) { if (e.target === sheet) closeShee
 document.getElementById('w-save').addEventListener('click', async function () {
   var err = document.getElementById('w-err');
   var name = document.getElementById('w-name').value.trim();
+  var email = document.getElementById('w-email').value.trim();
+  var phone = document.getElementById('w-phone').value.trim();
   err.style.display = 'none';
-  if (!name) { err.textContent = 'Please enter a name.'; err.style.display = 'block'; return; }
+  function fail(msg, id) {
+    err.textContent = msg; err.style.display = 'block';
+    document.getElementById(id).focus();
+  }
+  if (!name) { fail('Please enter a name.', 'w-name'); return; }
+  // Backslashes inside this template literal are consumed before the browser
+  // sees them, so check the address without a regex. The server validates properly.
+  var at = email.indexOf('@');
+  var dot = email.lastIndexOf('.');
+  var looksLikeEmail = at > 0 && dot > at + 1 && dot < email.length - 2 && email.indexOf(' ') === -1;
+  if (!looksLikeEmail) { fail('Please enter a valid email.', 'w-email'); return; }
+  if (phone.length < 6) { fail('Please enter a WhatsApp number.', 'w-phone'); return; }
   this.disabled = true; this.textContent = 'Adding\\u2026';
   try {
     var r = await fetch('/checkin/walkin?key=' + KEY, {
@@ -343,8 +367,8 @@ document.getElementById('w-save').addEventListener('click', async function () {
       body: JSON.stringify({
         name: name,
         company: document.getElementById('w-company').value,
-        phone: document.getElementById('w-phone').value,
-        email: document.getElementById('w-email').value,
+        phone: phone,
+        email: email,
         seats: document.getElementById('w-seats').value,
       }),
     });
