@@ -9,6 +9,7 @@ const slides = require('./slides');
 const badges = require('./badges');
 const feedback = require('./feedback');
 const screen = require('./screen');
+const version = require('./version');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -598,6 +599,8 @@ app.get('/admin', (req, res) => {
     padding-bottom:calc(110px + env(safe-area-inset-bottom))}
   h1{font-size:19px;line-height:1.35}
   h1 small{display:block;font-size:13.5px;color:var(--grey);font-weight:500;margin-top:3px}
+  h1 .ver{font-size:11.5px;font-weight:600;letter-spacing:.5px;color:var(--grey);
+    background:#EFEAE0;border-radius:20px;padding:3px 9px;text-decoration:none;vertical-align:middle}
   .bar{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}
   .btn{flex:1 1 auto;text-align:center;padding:11px 14px;border-radius:9px;font-size:14px;
     font-weight:600;text-decoration:none;white-space:nowrap}
@@ -655,7 +658,7 @@ app.get('/admin', (req, res) => {
   .wl a{color:#111}
   @media(max-width:600px){body{padding:14px;padding-bottom:calc(120px + env(safe-area-inset-bottom))}.btn{flex:1 1 46%}}
   </style></head><body>
-  <h1>Registrations: ${rows.length}
+  <h1>Registrations: ${rows.length} <a class="ver" href="/admin/changelog?key=${k}">v${version.VERSION}</a>
     <small>${seats} of ${SEAT_CAP} seats &middot; ${paidCount} paid${
       compCount ? ' &middot; ' + compCount + ' complimentary' : ''} &middot; ${money(revenue)} total${
       waitlist.length ? ' &middot; ' + waitlist.length + ' on the waitlist' : ''}</small></h1>
@@ -1110,6 +1113,7 @@ feedback.mount(app, {
   },
 });
 screen.mount(app);
+version.mount(app, { guard });
 
 app.get('/health', (_req, res) => res.json({
   ok: true,
@@ -1120,11 +1124,12 @@ app.get('/health', (_req, res) => res.json({
   seatPrice: SEAT_PRICE,
   seatCap: SEAT_CAP,
   seatsLeft: seatsLeft(),
+  version: version.VERSION,
 }));
 
 app.listen(PORT, () => {
   const mode = GHL_WEBHOOK_URL ? 'webhook' : (GHL_API_TOKEN && GHL_LOCATION_ID ? 'api' : 'NOT CONFIGURED (still placeholders)');
-  console.log(`CHA-08 event page running on :${PORT}`);
+  console.log(`CHA-08 event page v${version.VERSION} running on :${PORT}`);
   console.log(`[ghl] mode: ${mode} | tag: "${GHL_TAG}" | assigned to: ${GHL_ASSIGNED_USER || 'nobody'}`);
   console.log(`[seats] cap ${SEAT_CAP} | ${seatsLeft()} left`);
   console.log(`[payment] ${payment.isEnabled()
