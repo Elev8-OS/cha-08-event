@@ -93,7 +93,9 @@ header{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid 
 header img{height:34px} header img.c{height:50px}
 .title{font-family:'Archivo Black',sans-serif;font-size:17px;line-height:1.2}
 .title span{display:block;font-family:Inter,sans-serif;font-weight:500;font-size:12.5px;color:var(--grey)}
-.count{margin-left:auto;text-align:right}
+.back{margin-left:auto;color:var(--grey);text-decoration:none;font-size:14px;font-weight:600;
+  padding:8px 12px;border:1px solid #e0dace;border-radius:8px;background:#fff}
+.count{text-align:right;margin-left:18px}
 .count .n{font-family:'Archivo Black',sans-serif;font-size:26px;line-height:1}
 .count .l{font-size:11.5px;color:var(--grey);letter-spacing:1px;text-transform:uppercase}
 .search{padding:16px 22px 8px}
@@ -129,6 +131,7 @@ header img{height:34px} header img.c{height:50px}
   <img class="c" src="/img/cha.jpg?v=2" alt="Canggu Hospitality Association">
   <img src="/img/mekari.jpg?v=2" alt="Mekari">
   <div class="title">CHECK-IN<span>Smarter Revenue, Better Tech &middot; 28 August</span></div>
+  <a class="back" href="/admin?key=${k}">&larr; Admin</a>
   <div class="count"><div class="n" id="count">0 / 0</div><div class="l">guests arrived</div></div>
 </header>
 
