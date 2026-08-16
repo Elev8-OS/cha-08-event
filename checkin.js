@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const ghl = require('./ghl');
+const version = require('./version');
 
 function mount(app, deps) {
   const { DATA_DIR, guard, readAll, paidSet, compSet, addGhlTag, removeGhlTag,
@@ -137,11 +138,11 @@ function mount(app, deps) {
     if (!guard(req, res)) return;
     const k = encodeURIComponent(req.query.key);
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    res.send(page(k));
+    res.send(page(k, version.VERSION));
   });
 }
 
-function page(k) {
+function page(k, ver) {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -243,7 +244,7 @@ body.browser .toast{bottom:calc(90px + env(safe-area-inset-bottom))}
   <img src="/img/elev8.jpg" alt="Elev8 Suite">
   <img class="c" src="/img/cha.jpg?v=2" alt="Canggu Hospitality Association">
   <img src="/img/mekari.jpg?v=2" alt="Mekari">
-  <div class="title">CHECK-IN<span>Smarter Revenue, Better Tech &middot; 28 August</span></div>
+  <div class="title">CHECK-IN<span>Smarter Revenue, Better Tech &middot; 28 August &middot; v${ver}</span></div>
   <a class="back" href="/admin?key=${k}">&larr; Admin</a>
   <div class="count"><div class="n" id="count">0 / 0</div><div class="l">guests arrived</div></div>
 </header>
