@@ -499,7 +499,14 @@ app.get('/admin/resync', async (req, res) => {
     try { const mode = await sendToGHL(entry); if (mode !== 'disabled') { logSync(entry.email, 'sent', mode); sent++; } }
     catch (e) { logSync(entry.email, 'failed', e.message); errors.push(entry.email + ': ' + e.message); }
   }
-  res.json({ pending: pending.length, sent, errors });
+  const k = encodeURIComponent(req.query.key);
+  res.send(`<!doctype html><meta charset="utf-8"><title>Resync</title>
+  <style>body{font-family:system-ui;padding:32px;background:#F7F4EE;max-width:640px}
+  li{font-size:14px;color:#a33}</style>
+  <h2>GHL resync</h2>
+  <p>${pending.length} registration(s) were not marked as sent. ${sent} synced now.</p>
+  ${errors.length ? '<ul>' + errors.map((e) => `<li>${String(e).replace(/[<>&]/g, '')}</li>`).join('') + '</ul>' : ''}
+  <p><a href="/admin?key=${k}">\u2190 Back to registrations</a></p>`);
 });
 
 // Midtrans calls this when a payment settles. Public endpoint - every payload
@@ -593,6 +600,7 @@ app.get('/admin/stats', (req, res) => {
   .card .n{font-size:26px;font-weight:700}
   .card .l{font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px}
   a{color:#333}</style>
+  <p><a href="/admin?key=${k}">\u2190 Back to registrations</a></p>
   <h1>Visitor statistics</h1>
   <div class="cards">
     <div class="card"><div class="n">${totalViews}</div><div class="l">Page views</div></div>
