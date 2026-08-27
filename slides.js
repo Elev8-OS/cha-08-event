@@ -10,13 +10,13 @@
 const SESSIONS = [
   {
     title: 'Revenue management',
-    speaker: 'Andika Praba \u00b7 Elev8 Suite',
+    speaker: 'Andika Praba · Elev8 Suite',
     blurb: 'Pricing, OTA mix and the levers that move RevPAR on a Bali property.',
     file: '',
   },
   {
     title: 'Finance & reporting',
-    speaker: 'Intan Puspita Dewi \u00b7 Elevate Villas Bali, with Mekari Jurnal',
+    speaker: 'Intan Puspita Dewi · Elevate Villas Bali, with Mekari Jurnal',
     blurb: 'Compliant bookkeeping and owner reporting in a real operation.',
     file: '',
   },
@@ -34,13 +34,13 @@ const SESSIONS = [
   },
   {
     title: 'Direct booking playbook',
-    speaker: 'Reto Wyss \u00b7 Elev8 Suite',
+    speaker: 'Reto Wyss · Elev8 Suite',
     blurb: 'Reaching 40%+ direct bookings without an agency or a developer.',
     file: '',
   },
   {
     title: 'AI in daily operations',
-    speaker: 'Reto Wyss \u00b7 Elev8 Suite',
+    speaker: 'Reto Wyss · Elev8 Suite',
     blurb: 'Where AI earns its place in an operation - and where it does not.',
     file: '',
   },
@@ -62,21 +62,48 @@ function mount(app) {
   });
 }
 
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
 function page(map) {
-  // A session's deck is whatever the admin last uploaded for it
-  const fileFor = (s) => (map[decks.slug(s.title)] || {}).file || s.file || '';
-  const any = SESSIONS.some((s) => fileFor(s));
-  const rows = SESSIONS.map((s) => `
+  // A session's material is every PDF the admin uploaded for it, in the order
+  // they went up, plus an optional link for what does not fit in a PDF.
+  // `s.file` above is the pre-admin fallback and still honoured.
+  const entryFor = (s) => {
+    const e = map[decks.slug(s.title)] || { files: [], drive: '' };
+    const files = e.files.length ? e.files : s.file ? [{ file: s.file, original: '' }] : [];
+    return { files, drive: e.drive || '' };
+  };
+  const any = SESSIONS.some((s) => { const e = entryFor(s); return e.files.length || e.drive; });
+
+  // The filename is the label, so "Andika - Revenue.pdf" becomes a button
+  // reading "Andika - Revenue". Decks carried over from before the admin
+  // existed have no filename recorded, hence the fallback.
+  const label = (f) => {
+    const n = String(f.original || '').replace(/\.pdf$/i, '').trim();
+    return n ? esc(n) : 'Download PDF';
+  };
+
+  const rows = SESSIONS.map((s) => {
+    const e = entryFor(s);
+    const links = e.files.map((f) =>
+      `<a class="dl" href="/decks/${encodeURIComponent(f.file)}" download>${label(f)}</a>`);
+    if (e.drive) {
+      links.push(`<a class="dl alt" href="${esc(e.drive)}" target="_blank" rel="noopener noreferrer">More on Google Drive</a>`);
+    }
+    return `
     <article class="s">
       <div class="txt">
         <h3>${s.title}</h3>
         <div class="sp">${s.speaker}</div>
         <p>${s.blurb}</p>
       </div>
-      ${fileFor(s)
-        ? `<a class="dl" href="/decks/${encodeURIComponent(fileFor(s))}" download>Download PDF</a>`
+      ${links.length
+        ? `<div class="links">${links.join('')}</div>`
         : '<span class="soon">Coming soon</span>'}
-    </article>`).join('');
+    </article>`;
+  }).join('');
 
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8">
@@ -105,14 +132,21 @@ h1{font-family:'Archivo Black',sans-serif;text-align:center;font-size:clamp(26px
 .s h3{font-size:17.5px}
 .s .sp{font-size:13.5px;color:var(--gold);font-weight:600;margin-top:2px}
 .s p{font-size:14.5px;color:#444;margin-top:7px}
+/* A column, so three decks read as a list rather than a wrapped row of
+   buttons of random width. */
+.links{display:flex;flex-direction:column;gap:8px;align-items:stretch;max-width:270px}
 .dl{background:var(--ink);color:var(--cream);text-decoration:none;font-weight:700;font-size:14px;
-  padding:12px 18px;border-radius:9px;white-space:nowrap}
+  padding:12px 18px;border-radius:9px;text-align:center;overflow-wrap:anywhere}
+/* The Drive link leaves the site and is not a PDF; it should not look like
+   the download next to it. */
+.dl.alt{background:transparent;color:var(--ink);border:1px solid #d8d1c2;font-weight:600}
 .soon{font-size:13px;font-weight:600;color:#999;background:#F2EEE5;border-radius:20px;padding:7px 14px;white-space:nowrap}
 .cta{background:var(--ink);color:var(--cream);border-radius:14px;padding:26px;margin-top:32px;text-align:center}
 .cta b{color:var(--gold)}
 .cta a{display:inline-block;margin-top:14px;background:var(--gold);color:#111;text-decoration:none;
   font-weight:700;padding:13px 22px;border-radius:9px}
 footer{text-align:center;font-size:13px;color:var(--grey);margin-top:44px}
+@media(max-width:560px){.links{max-width:none;width:100%}}
 </style></head><body>
 <div class="wrap">
   <div class="logos">
@@ -125,7 +159,7 @@ footer{text-align:center;font-size:13px;color:var(--grey);margin-top:44px}
   <p class="lead">Smarter Revenue, Better Tech &middot; 28 August 2026 &middot; OXO The Factory, Canggu</p>
 
   ${any ? '' : `<div class="note"><b>The decks are being finalised.</b> Each speaker reviews their slides
-    before we publish them here, usually within a few days of the event. Bookmark this page \u2014
+    before we publish them here, usually within a few days of the event. Bookmark this page —
     everyone who attended also gets an email the moment they are up.</div>`}
 
   ${rows}
