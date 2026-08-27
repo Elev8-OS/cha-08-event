@@ -6,6 +6,7 @@ const payment = require('./payment');
 const checkin = require('./checkin');
 const archive = require('./archive');
 const slides = require('./slides');
+const xlsx = require('./xlsx');
 const badges = require('./badges');
 const feedback = require('./feedback');
 const screen = require('./screen');
@@ -680,6 +681,7 @@ app.get('/admin', (req, res) => {
       <a class="btn primary" href="/checkin?key=${k}">Check-in desk</a>
       <a class="btn ghost" href="/admin/questions?key=${k}">Questions</a>
       <a class="btn ghost" href="/admin/badges?key=${k}">Badges</a>
+      <a class="btn ghost" href="/admin/attendees.xlsx?key=${k}">Guest list</a>
       <a class="btn ghost" href="/guides.html" target="_blank">Desk guide</a>
     </div>
     <div class="grp">
@@ -768,6 +770,65 @@ app.get('/admin.csv', (req, res) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="registrations.csv"');
   res.send(csv);
+});
+
+// The door list as a spreadsheet. Everyone whose seat is actually theirs:
+// payment verified, or invited and owing nothing. Sorted by name, because at
+// the door you are looking someone up, not scrolling by signup time.
+app.get('/admin/attendees.xlsx', (req, res) => {
+  if (!guard(req, res)) return;
+  const paid = paidSet();
+  const comps = compSet();
+  const now = new Date();
+
+  // Bali time, so the timestamps read the way the desk reads them
+  const local = (ts) => {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleString('en-GB', {
+      timeZone: 'Asia/Makassar', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).replace(',', '');
+  };
+
+  const rows = readAll()
+    .filter((r) => paid.get(r.email) === true || comps.has(r.email))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en', { sensitivity: 'base' }))
+    .map((r) => {
+      const isComp = comps.has(r.email);
+      const seats = parseInt(r.guests, 10) || 1;
+      return [r.name, r.company, seats, isComp ? 'Complimentary' : 'Paid', r.walkin ? 'yes' : '',
+        r.phone, r.email, r.role, r.properties, r.employees, r.pms, r.pain,
+        isComp ? 0 : seats * SEAT_PRICE, local(r.ts)];
+    });
+
+  const buf = xlsx.sheet({
+    name: 'Confirmed',
+    columns: [
+      { header: 'Name', width: 26 },
+      { header: 'Company', width: 26 },
+      { header: 'Seats', width: 7, type: 'number' },
+      { header: 'Status', width: 15 },
+      { header: 'Walk-in', width: 9 },
+      { header: 'WhatsApp', width: 18 },
+      { header: 'Email', width: 30 },
+      { header: 'Role', width: 20 },
+      { header: 'Properties', width: 12 },
+      { header: 'Staff', width: 10 },
+      { header: 'PMS', width: 18 },
+      { header: 'Pain point', width: 36 },
+      { header: 'Amount IDR', width: 13, type: 'money' },
+      { header: 'Registered', width: 17 },
+    ],
+    rows,
+  }, now);
+
+  const stamp = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Makassar' });
+  console.log('[xlsx] guest list', rows.length, 'confirmed');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="confirmed-attendees-${stamp}.xlsx"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(buf);
 });
 
 

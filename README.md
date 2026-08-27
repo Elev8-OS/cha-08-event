@@ -17,7 +17,10 @@ not belong in an 8 MB PDF. Files written by an older single-deck version are mig
 - `/` — landing page with registration form
 - `POST /api/rsvp` — registration (honeypot + duplicate guard included)
 - `/admin?key=ADMIN_KEY` — registrations table
-- `/admin.csv?key=ADMIN_KEY` — CSV export
+- `/admin.csv?key=ADMIN_KEY` — CSV export of every registration
+- `/admin/attendees.xlsx?key=ADMIN_KEY` — the door list as a spreadsheet: confirmed guests only
+  (payment verified or complimentary), sorted by name. Written by `xlsx.js`, which builds the
+  file itself so the app keeps its single dependency.
 - `/slides` — public slides page: every PDF uploaded for a session, plus its optional link
 - `/admin/decks?key=ADMIN_KEY` — upload PDFs per session (several are allowed) and set an optional Google Drive link
 - `/health` — healthcheck
