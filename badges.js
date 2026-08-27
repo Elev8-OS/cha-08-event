@@ -6,14 +6,20 @@
  * leave nothing for the printer's unprintable edge, so two by two it is, with
  * room for scissors between them.
  *
- * Multi-seat registrations get one badge per seat: the extra ones carry the
- * company only, because we never asked for the colleagues' names.
+ * Multi-seat registrations get one badge per seat. We never asked for the
+ * colleagues' names, so those badges carry the company and a hairline where
+ * the name goes: the desk asks and writes it in. Four sheets of fully blank
+ * badges follow for walk-ins, same logos, nothing filled in.
  *
  * The logo row matches the landing page, Imigrasi included: a guest wearing
  * this badge is standing in front of the officer whose crest is on it.
  */
 
 const PER_SHEET = 4;
+// Enough for a busy door without printing a stack nobody uses. ?blanks=N
+// overrides it on the day.
+const BLANK_SHEETS = 4;
+const BLANK = { name: '', company: '' };
 
 function mount(app, deps) {
   const { guard, readAll, paidSet } = deps;
@@ -24,18 +30,26 @@ function mount(app, deps) {
     const onlyPaid = String(req.query.paid || '') === '1';
     const paid = paidSet();
 
+    const q = req.query.blanks;
+    const blankSheets = q === undefined
+      ? BLANK_SHEETS
+      : Math.min(Math.max(parseInt(q, 10) || 0, 0), 20);
+
     const badges = [];
     readAll().forEach((r) => {
       if (onlyPaid && paid.get(r.email) !== true) return;
       const seats = Math.max(1, parseInt(r.guests, 10) || 1);
-      badges.push({ name: r.name, company: r.company || '', guest: false });
+      badges.push({ name: r.name, company: r.company || '' });
+      // The colleagues on a multi-seat booking: printing "Guest" told nobody
+      // who they were and the desk wrote over it anyway. Company printed,
+      // name left to the pen.
       for (let i = 1; i < seats; i++) {
-        badges.push({ name: 'Guest', company: r.company || r.name, guest: true });
+        badges.push({ name: '', company: r.company || r.name });
       }
     });
 
     res.setHeader('Cache-Control', 'no-store');
-    res.send(page(k, badges, onlyPaid));
+    res.send(page(k, badges, onlyPaid, blankSheets));
   });
 }
 
@@ -52,8 +66,14 @@ function nameSize(n) {
   return '32px';
 }
 
-function page(k, badges, onlyPaid) {
-  const sheets = Math.ceil(badges.length / PER_SHEET) || 1;
+function page(k, badges, onlyPaid, blankSheets) {
+  const sheets = [];
+  for (let i = 0; i < badges.length; i += PER_SHEET) sheets.push(badges.slice(i, i + PER_SHEET));
+  // Blanks start on a sheet of their own. Letting them fill up the tail of a
+  // half-empty sheet of real badges means cutting them apart to reach one.
+  for (let i = 0; i < blankSheets; i++) {
+    sheets.push(Array.from({ length: PER_SHEET }, () => BLANK));
+  }
 
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><title>Name badges (${badges.length})</title>
@@ -82,6 +102,9 @@ body{font-family:Inter,system-ui,sans-serif;background:#F7F4EE;color:#111}
 .badge .logos img.c{max-height:8mm}
 .badge .nm{font-family:'Archivo Black',sans-serif;line-height:1.12;word-break:break-word;
   margin-top:auto}
+/* A name we do not know yet. As tall as a printed one so a sheet mixing both
+   lines up, with a hairline to write on - pale enough that the pen wins. */
+.badge .write{margin-top:auto;width:100%;height:11mm;border-bottom:.3mm solid #DED7C7}
 .badge .co{font-size:13px;color:#555;margin-top:3mm;line-height:1.3;
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .badge .rule{width:16mm;height:1mm;background:#F6BB12;margin:5mm 0 auto 0}
@@ -98,20 +121,26 @@ body{font-family:Inter,system-ui,sans-serif;background:#F7F4EE;color:#111}
 </style></head><body>
 
 <div class="toolbar">
-  <h1>Name badges: ${badges.length} &middot; ${sheets} sheet${sheets > 1 ? 's' : ''}</h1>
+  <h1>Name badges: ${badges.length} &middot; ${sheets.length} sheet${sheets.length > 1 ? 's' : ''}${
+    blankSheets ? ` &middot; ${blankSheets} of them blank` : ''}</h1>
   <p>A4, four per sheet at 70&times;105&nbsp;mm portrait \u2014 the paper size for our lanyard pouches.
      Print at <b>100% scale</b> with margins set to none, then cut along the dashed lines.
-     Registrations with several seats get one badge per seat.</p>
+     Registrations with several seats get one badge per seat; the extra ones carry the company
+     and a line for the name, which the desk asks for and writes in.${blankSheets
+      ? ` The last ${blankSheets} sheets are blank for walk-ins \u2014 logos only, nothing filled in.`
+      : ''}</p>
   <div class="acts">
     <button class="print" onclick="window.print()">Print</button>
-    <a href="/admin/badges?key=${k}${onlyPaid ? '' : '&paid=1'}">${onlyPaid ? 'Include unpaid' : 'Paid only'}</a>
+    <a href="/admin/badges?key=${k}${onlyPaid ? '' : '&paid=1'}${
+      blankSheets === BLANK_SHEETS ? '' : '&blanks=' + blankSheets}">${onlyPaid ? 'Include unpaid' : 'Paid only'}</a>
     <a href="/admin?key=${k}">&larr; Back to registrations</a>
   </div>
 </div>
 
-${badges.length
-    ? Array.from({ length: sheets }, (_, i) => `<div class="sheet">${
-      badges.slice(i * PER_SHEET, (i + 1) * PER_SHEET).map((b) => `
+${badges.length ? '' : '<div class="empty">No registrations to print yet \u2014 the blank sheets below are still here.</div>'}
+
+${sheets.map((sheet) => `<div class="sheet">${
+      sheet.map((b) => `
       <div class="badge">
         <div class="logos">
           <img src="/img/elev8.jpg" alt="">
@@ -119,12 +148,13 @@ ${badges.length
           <img src="/img/mekari.jpg?v=2" alt="">
           <img class="c" src="/img/imigrasi.jpg" alt="">
         </div>
-        <div class="nm" style="font-size:${nameSize(b.name)}">${esc(b.name)}</div>
+        ${b.name
+          ? `<div class="nm" style="font-size:${nameSize(b.name)}">${esc(b.name)}</div>`
+          : '<div class="write"></div>'}
         <div class="co">${esc(b.company)}</div>
         <div class="rule"></div>
         <div class="ev">SMARTER REVENUE, BETTER TECH<br>28 AUGUST 2026 &middot; OXO THE FACTORY</div>
-      </div>`).join('')}</div>`).join('')
-    : '<div class="empty">No registrations to print yet.</div>'}
+      </div>`).join('')}</div>`).join('')}
 
 </body></html>`;
 }
