@@ -97,6 +97,14 @@ function cleanLink(v) {
   return s;
 }
 
+// A Drive folder URL runs to a hundred characters of folder id. Show enough
+// of one to recognise which folder it points at, and no more — the card
+// column is narrow and a wrapped URL looks like a broken one.
+function shortLink(u) {
+  const s = String(u).replace(/^https:\/\//, '').replace(/^www\./, '');
+  return s.length > 34 ? s.slice(0, 32) + '…' : s;
+}
+
 function unpublish(file) {
   const full = path.join(DECK_DIR, file);
   // Keep the file, just unpublish it: a deleted deck is usually a mistake
@@ -216,12 +224,22 @@ function page(k, sessions, map) {
     const cur = map[key] || { files: [], drive: '' };
     const has = cur.files.length > 0 || !!cur.drive;
 
-    const files = cur.files.length
-      ? `<ul class="files">${cur.files.map((f) => `<li>
+    // A saved link is part of what the session publishes, so it is listed with
+    // the PDFs rather than hidden in the input below. Without this, a session
+    // that has a link and no PDF turns green and still reads "No deck yet".
+    const rows = cur.files.map((f) => `<li>
           <a href="/decks/${esc(f.file)}" target="_blank">${esc(f.original || f.file)}</a>
           <span class="meta">${size(f.size)}${f.ts ? ' &middot; ' + esc(f.ts.slice(0, 10)) : ''}</span>
           <button type="button" class="rm" data-file="${esc(f.file)}" title="Remove this PDF">&times;</button>
-        </li>`).join('')}</ul>`
+        </li>`);
+    if (cur.drive) {
+      rows.push(`<li class="drv">
+          <a href="${esc(cur.drive)}" target="_blank" rel="noopener noreferrer">${esc(shortLink(cur.drive))}</a>
+          <span class="meta">Google Drive &middot; shown on the slides page</span>
+        </li>`);
+    }
+    const files = rows.length
+      ? `<ul class="files">${rows.join('')}</ul>`
       : '<p class="none">No deck yet</p>';
 
     return `<article class="s${has ? ' has' : ''}" data-key="${key}">
@@ -272,6 +290,9 @@ function page(k, sessions, map) {
   .files .rm{grid-column:2;grid-row:1/span 2;align-self:center;background:#fff;border:1px solid #e3bcbc;
     color:#a33;border-radius:8px;width:30px;height:30px;font:inherit;font-size:17px;line-height:1;
     cursor:pointer;flex:none}
+  /* The link is not a file: separated, and in link blue rather than ink. */
+  .files .drv{border-top:1px dashed #e5e0d5;padding-top:8px;margin-top:1px}
+  .files .drv a{color:#1B5E9C}
   .none{color:#999}
   .acts{display:flex;gap:9px;align-items:center;margin-top:auto;padding-top:14px;flex-wrap:wrap}
   .pick{background:#F6BB12;border-radius:9px;padding:11px 16px;font-size:14px;font-weight:700;
@@ -322,6 +343,38 @@ function page(k, sessions, map) {
     if (!d) throw new Error('The server answered with HTTP ' + r.status + '. Please try again.');
     if (!d.ok) throw new Error(d.error || 'That did not work.');
     return d;
+  }
+
+  function shortLink(u) {
+    var s = String(u).replace(/^https:\\/\\//, '').replace(/^www\\./, '');
+    return s.length > 34 ? s.slice(0, 32) + '\u2026' : s;
+  }
+
+  // Saving a link has to change what the card shows, or the admin is left
+  // reading "No deck yet" under a field they just filled in. Done in place
+  // rather than with a reload: this page is used on venue wifi.
+  function drawLink(card, url) {
+    var state = card.querySelector('.state');
+    var list = state.querySelector('.files');
+    var row = state.querySelector('.drv');
+
+    if (!url) {
+      if (row) row.parentNode.removeChild(row);
+      list = state.querySelector('.files');
+      if (!list || !list.children.length) state.innerHTML = '<p class="none">No deck yet</p>';
+      return;
+    }
+    if (!list) { state.innerHTML = '<ul class="files"></ul>'; list = state.querySelector('.files'); }
+    if (!row) {
+      row = document.createElement('li');
+      row.className = 'drv';
+      row.innerHTML = '<a target="_blank" rel="noopener noreferrer"></a>'
+        + '<span class="meta">Google Drive \u00b7 shown on the slides page</span>';
+      list.appendChild(row);
+    }
+    var a = row.querySelector('a');
+    a.href = url;
+    a.textContent = shortLink(url);
   }
 
   function post(path, body) {
@@ -395,9 +448,13 @@ function page(k, sessions, map) {
     s.disabled = true;
     show(card2, 'Saving\\u2026', 'busy');
     try {
-      await post('/admin/decks/link', { session: card2.getAttribute('data-key'), url: url });
-      show(card2, url ? 'Link saved.' : 'Link removed.', 'ok');
-      card2.classList.add('has');
+      // Draw what the server accepted, not what was typed: it is the value
+      // that got stored, and it has been through the https check.
+      var d = await post('/admin/decks/link', { session: card2.getAttribute('data-key'), url: url });
+      card2.querySelector('.lk').value = d.drive || '';
+      drawLink(card2, d.drive || '');
+      show(card2, d.drive ? 'Link saved.' : 'Link removed.', 'ok');
+      card2.classList.toggle('has', !!d.drive || !!card2.querySelector('.files li:not(.drv)'));
     } catch (ex) { show(card2, ex.message, 'err'); }
     s.disabled = false;
   });
