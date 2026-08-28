@@ -385,7 +385,8 @@ function adminPage(k, questions) {
   const card = (q, top) => `<article class="q${q.done ? ' done' : ''}${top ? ' top' : ''}" data-id="${q.id}">
       <header><span class="v">${q.votes}<small>backing</small></span>
         <span class="meta">${esc(q.session || 'General')}</span></header>
-      <p>${esc(q.text)}</p>
+      <p class="txt">${esc(q.text)}</p>
+      <p class="orig" hidden></p>
       <footer><span class="who">${q.name ? esc(q.name) : 'anonymous'} &middot; ${esc(q.ts.slice(11, 16))}</span>
         <button class="mark">${q.done ? 'Undo' : 'Answered'}</button></footer>
     </article>`;
@@ -419,6 +420,16 @@ function adminPage(k, questions) {
   .mark{flex-shrink:0;background:#fff;border:1px solid #ddd;border-radius:9px;padding:9px 14px;
     font:inherit;font-weight:600;font-size:13.5px;cursor:pointer}
   .empty{background:#fff;border:1px dashed #d8d2c4;border-radius:14px;padding:36px;text-align:center;color:#666}
+  .tbar{display:flex;align-items:center;gap:10px;margin:0 0 14px;flex-wrap:wrap}
+  .tbar button{background:#111;color:#F7F4EE;border:0;border-radius:9px;padding:9px 14px;
+    font:inherit;font-weight:600;font-size:13.5px;cursor:pointer}
+  .tbar button.off{background:#fff;color:#111;border:1px solid #ddd6c8}
+  .tbar span{font-size:12.5px;color:#999}
+  /* The original stays under the translation: names, villa names and the odd
+     Indonesian term are worth seeing even when you cannot read the sentence. */
+  .orig{font-size:13px;color:#8f8878;font-style:italic;margin-top:7px;line-height:1.35;
+    padding-top:7px;border-top:1px dashed #eee7db}
+  .q p.pending{opacity:.55}
   a{color:#333}
   @media(max-width:600px){body{padding:14px}
     .grid{grid-template-columns:1fr;gap:10px}
@@ -430,12 +441,106 @@ function adminPage(k, questions) {
   <h1>Questions from the room</h1>
   <p class="lead">Sorted by how many people backed each one. Tap <b>Answered</b> when you
     have dealt with it, and it drops out of the audience's list too.</p>
+  <div class="tbar">
+    <button id="tg" type="button"></button>
+    <span id="tnote"></span>
+  </div>
   ${open.length
     ? `<div class="grid">${open.map((q, i) => card(q, i === 0 && q.votes > 0)).join('')}</div>`
     : '<div class="empty">No questions yet.</div>'}
   ${done.length ? `<h2>Answered (${done.length})</h2><div class="grid">${done.map((q) => card(q)).join('')}</div>` : ''}
 
   <script>
+  /**
+   * Questions come in Indonesian; whoever runs the Q&A may not read it.
+   * Translation happens here in the browser, not on the server: no API key
+   * in the repo, nothing to pay for, and if it ever fails the original text
+   * is what was on the card all along.
+   *
+   * The page reloads itself every 30 seconds, so translations are cached by
+   * question id in localStorage — otherwise the same six questions would be
+   * sent off again twice a minute.
+   */
+  var TKEY = 'cha08-translate', CKEY = 'cha08-tcache';
+  var cache = {};
+  try { cache = JSON.parse(localStorage.getItem(CKEY) || '{}'); } catch (e) { cache = {}; }
+  function saveCache() { try { localStorage.setItem(CKEY, JSON.stringify(cache)); } catch (e) {} }
+  function wanted() { try { return localStorage.getItem(TKEY) !== '0'; } catch (e) { return true; } }
+
+  async function viaGoogle(text) {
+    var u = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q='
+      + encodeURIComponent(text);
+    var r = await fetch(u);
+    if (!r.ok) throw new Error('http ' + r.status);
+    var d = await r.json();
+    return { t: (d[0] || []).map(function (x) { return x[0]; }).join(''), src: d[2] || '' };
+  }
+  // Documented free service, used only when the first one is unreachable.
+  async function viaMyMemory(text) {
+    var r = await fetch('https://api.mymemory.translated.net/get?langpair=id|en&q=' + encodeURIComponent(text));
+    if (!r.ok) throw new Error('http ' + r.status);
+    var d = await r.json();
+    var t = d && d.responseData && d.responseData.translatedText;
+    if (!t) throw new Error('empty');
+    return { t: t, src: 'id' };
+  }
+  async function translate(text) {
+    try { return await viaGoogle(text); } catch (e) { return await viaMyMemory(text); }
+  }
+
+  function paint(card, rec) {
+    var p = card.querySelector('.txt'), o = card.querySelector('.orig');
+    if (!p || !o) return;
+    var original = card.getAttribute('data-orig');
+    if (!rec || !rec.t || rec.src === 'en' || rec.t.trim() === original.trim()) {
+      p.textContent = original; o.hidden = true; return;   // already English
+    }
+    p.textContent = rec.t;
+    o.textContent = original;
+    o.hidden = false;
+  }
+
+  function reset(card) {
+    var p = card.querySelector('.txt'), o = card.querySelector('.orig');
+    p.textContent = card.getAttribute('data-orig');
+    p.classList.remove('pending');
+    o.hidden = true;
+  }
+
+  async function run() {
+    var cards = Array.prototype.slice.call(document.querySelectorAll('.q'));
+    cards.forEach(function (c) {
+      if (!c.hasAttribute('data-orig')) c.setAttribute('data-orig', c.querySelector('.txt').textContent);
+    });
+    var tg = document.getElementById('tg'), note = document.getElementById('tnote');
+    var on = wanted();
+    tg.textContent = on ? 'Showing English' : 'Translate to English';
+    tg.className = on ? '' : 'off';
+    note.textContent = on ? 'Original underneath each question.' : '';
+    if (!on) { cards.forEach(reset); return; }
+
+    var failed = 0;
+    for (var i = 0; i < cards.length; i++) {
+      var c = cards[i], id = c.getAttribute('data-id'), orig = c.getAttribute('data-orig');
+      if (cache[id] && cache[id].o === orig) { paint(c, cache[id]); continue; }
+      c.querySelector('.txt').classList.add('pending');
+      try {
+        var rec = await translate(orig);
+        rec.o = orig;
+        cache[id] = rec; saveCache();
+        paint(c, rec);
+      } catch (e) { failed++; }
+      c.querySelector('.txt').classList.remove('pending');
+    }
+    if (failed) note.textContent = failed + ' could not be translated — original text shown.';
+  }
+
+  document.getElementById('tg').addEventListener('click', function () {
+    try { localStorage.setItem(TKEY, wanted() ? '0' : '1'); } catch (e) {}
+    run();
+  });
+  run();
+
   document.addEventListener('click', async function (e) {
     var b = e.target.closest('.mark');
     if (!b) return;
